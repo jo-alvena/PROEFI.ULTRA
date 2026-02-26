@@ -33,6 +33,7 @@ window.login = async function() {
 
   try {
     await signInWithEmailAndPassword(auth, email, senha);
+location.reload();
   } catch (error) {
     alert("Erro: " + error.message);
   }
@@ -44,7 +45,8 @@ window.cadastrar = async function() {
 
   try {
     await createUserWithEmailAndPassword(auth, email, senha);
-    alert("Usuário criado. Aguarde liberação do gerente.");
+alert("Usuário criado. Aguarde liberação do gerente.");
+location.reload();
   } catch (error) {
     alert("Erro: " + error.message);
   }
@@ -113,3 +115,4 @@ function mostrarCorretor(email) {
 <h2>Carregando...</h2>
 </body>
 </html>
+
