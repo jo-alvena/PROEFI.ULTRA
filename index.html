@@ -1,76 +1,115 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>PROEFI</title>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+<meta charset="UTF-8">
+<title>PROEFI</title>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    const firebaseConfig = {
-      apiKey: "SUA_API_KEY",
-      authDomain: "proefi-alvena.firebaseapp.com",
-      projectId: "proefi-alvena",
-      storageBucket: "proefi-alvena.firebasestorage.app",
-      messagingSenderId: "1084612497727",
-      appId: "1:1084612497727:web:d9b1de2962cce8123b038a"
-    };
+const firebaseConfig = {
+  apiKey: "AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
+  authDomain: "proefi-alvena.firebaseapp.com",
+  projectId: "proefi-alvena",
+  storageBucket: "proefi-alvena.firebasestorage.app",
+  messagingSenderId: "1084612497727",
+  appId: "1:1084612497727:web:d9b1de2962cce8123b038a"
+};
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-    onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        document.body.innerHTML = "<h2>Faça login primeiro.</h2>";
-        return;
-      }
+window.login = async function() {
+  const email = document.getElementById("email").value;
+  const senha = document.getElementById("senha").value;
 
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
+  try {
+    await signInWithEmailAndPassword(auth, email, senha);
+  } catch (error) {
+    alert("Erro: " + error.message);
+  }
+};
 
-      if (!userSnap.exists()) {
-        document.body.innerHTML = "<h2>Usuário não autorizado.</h2>";
-        return;
-      }
+window.cadastrar = async function() {
+  const email = document.getElementById("email").value;
+  const senha = document.getElementById("senha").value;
 
-      const dados = userSnap.data();
+  try {
+    await createUserWithEmailAndPassword(auth, email, senha);
+    alert("Usuário criado. Aguarde liberação do gerente.");
+  } catch (error) {
+    alert("Erro: " + error.message);
+  }
+};
 
-      if (dados.role === "gerente") {
-        mostrarGerente(user.email);
-      } else {
-        mostrarCorretor(user.email);
-      }
-    });
+window.logout = function() {
+  signOut(auth);
+};
 
-    function mostrarGerente(email) {
-      document.body.innerHTML = `
-        <h1>PROEFI - GERENTE</h1>
-        <p>${email}</p>
-        <button onclick="logout()">Sair</button>
-        <hr>
-        <h3>Painel de Upload de Leads (em breve)</h3>
-      `;
-    }
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    mostrarLogin();
+    return;
+  }
 
-    function mostrarCorretor(email) {
-      document.body.innerHTML = `
-        <h1>PROEFI - CORRETOR</h1>
-        <p>${email}</p>
-        <button onclick="logout()">Sair</button>
-        <hr>
-        <h3>Distribuição automática em breve</h3>
-      `;
-    }
+  const userRef = doc(db, "users", user.uid);
+  const userSnap = await getDoc(userRef);
 
-    window.logout = function() {
-      signOut(auth);
-      location.reload();
-    }
-  </script>
+  if (!userSnap.exists()) {
+    document.body.innerHTML = "<h2>Usuário não autorizado.</h2><button onclick='logout()'>Sair</button>";
+    return;
+  }
+
+  const dados = userSnap.data();
+
+  if (dados.role === "gerente") {
+    mostrarGerente(user.email);
+  } else {
+    mostrarCorretor(user.email);
+  }
+});
+
+function mostrarLogin() {
+  document.body.innerHTML = `
+    <h2>PROEFI</h2>
+    <input id="email" placeholder="Email"><br><br>
+    <input id="senha" type="password" placeholder="Senha"><br><br>
+    <button onclick="login()">Entrar</button>
+    <button onclick="cadastrar()">Criar Conta</button>
+  `;
+}
+
+function mostrarGerente(email) {
+  document.body.innerHTML = `
+    <h1>PROEFI - GERENTE</h1>
+    <p>${email}</p>
+    <button onclick="logout()">Sair</button>
+    <hr>
+    <h3>Painel de Upload de Leads (em breve)</h3>
+  `;
+}
+
+function mostrarCorretor(email) {
+  document.body.innerHTML = `
+    <h1>PROEFI - CORRETOR</h1>
+    <p>${email}</p>
+    <button onclick="logout()">Sair</button>
+    <hr>
+    <h3>Distribuição automática em breve</h3>
+  `;
+}
+
+</script>
 </head>
 <body>
-  <h2>Carregando...</h2>
+<h2>Carregando...</h2>
 </body>
 </html>
