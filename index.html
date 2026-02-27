@@ -2,56 +2,26 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PROEFI - ALVENA</title>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
 <style>
-body{
- margin:0;
- font-family:Arial;
- background:#21346C;
- color:white;
-}
-.wrap{max-width:520px;margin:auto;padding:12px;}
-.card{
- background:white;
- color:#21346C;
- padding:12px;
- border-radius:12px;
- margin-bottom:10px;
-}
-.btn{
- width:100%;
- padding:14px;
- border:none;
- border-radius:10px;
- font-weight:bold;
- margin-top:8px;
-}
-.btnBlue{background:#21346C;color:white;}
-.btnGold{background:#BC8A0B;color:white;}
-.btnGreen{background:#B9F6CA;}
-.btnRed{background:#FFCCCB;}
-
-.menu{
- position:fixed;
- bottom:0;left:0;right:0;
- display:flex;
- background:white;
- border-top:1px solid #ccc;
-}
-.menu button{
- flex:1;
- padding:20px;
- font-size:16px;
- font-weight:bold;
- border:none;
- background:white;
-}
+body{margin:0;font-family:Arial;background:#21346C;color:#fff}
+.wrap{max-width:520px;margin:auto;padding:10px}
+.card{background:#fff;color:#21346C;padding:12px;border-radius:12px;margin-bottom:10px}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;margin-top:8px}
+.btnBlue{background:#21346C;color:#fff}
+.btnGold{background:#BC8A0B;color:#fff}
+.btnGreen{background:#B9F6CA}
+.btnRed{background:#FFCCCB}
+.menu{position:fixed;bottom:0;left:0;right:0;display:flex;background:#fff}
+.menu button{flex:1;padding:20px;font-size:16px;font-weight:bold;border:none;background:#fff}
+input,select,textarea{width:100%;padding:10px;margin-top:6px}
 </style>
 </head>
 
@@ -59,255 +29,212 @@ body{
 <div class="wrap" id="app">Carregando...</div>
 
 <script>
-
-/* ===== FIREBASE ===== */
 const firebaseConfig={
- apiKey:"AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
- authDomain:"proefi-alvena.firebaseapp.com",
- projectId:"proefi-alvena",
- storageBucket:"proefi-alvena.firebasestorage.app",
- messagingSenderId:"1084612497727",
- appId:"1:1084612497727:web:d9b1de2962cce8123b038a"
+apiKey:"AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
+authDomain:"proefi-alvena.firebaseapp.com",
+projectId:"proefi-alvena",
+storageBucket:"proefi-alvena.firebasestorage.app",
+messagingSenderId:"1084612497727",
+appId:"1:1084612497727:web:d9b1de2962cce8123b038a"
 };
-
 firebase.initializeApp(firebaseConfig);
 const auth=firebase.auth();
 const db=firebase.firestore();
 
-/* ===== STATE ===== */
 let userData=null;
 let leadAtual=null;
 
-/* ===== HELPERS ===== */
 function $(id){return document.getElementById(id);}
-function cleanPhone(v){return String(v||"").replace(/\D/g,"");}
+function clean(v){return String(v||"").replace(/\D/g,"");}
 
-/* ===== LOGIN ===== */
-function renderLogin(){
- $("app").innerHTML=`
- <div class="card">
-   <h2>PROEFI - ALVENA</h2>
-   <div>Produção Eficiente<br>Alvena Soluções Imobiliárias</div>
-   <br>
-   <input id="email" placeholder="Email" style="width:100%;padding:10px"><br><br>
-   <input id="senha" type="password" placeholder="Senha" style="width:100%;padding:10px">
-   <button class="btn btnGold" onclick="doLogin()">ENTRAR</button>
- </div>`;
+/* LOGIN */
+function login(){
+app.innerHTML=`<div class="card">
+<h2>PROEFI - ALVENA</h2>
+<input id="email" placeholder="Email">
+<input id="senha" type="password" placeholder="Senha">
+<button class="btn btnGold" onclick="doLogin()">ENTRAR</button>
+</div>`;
+}
+window.doLogin=()=>auth.signInWithEmailAndPassword(email.value,senha.value);
+
+/* APP */
+function appUI(){
+app.innerHTML=`<div id="view"></div>
+<div class="menu">
+<button onclick="tab('painel')">🏠</button>
+<button onclick="tab('atendimento')">☎️</button>
+<button onclick="tab('resultados')">📊</button>
+<button onclick="tab('config')">⚙️</button>
+</div>`;
+tab("painel");
 }
 
-async function doLogin(){
- try{
-   await auth.signInWithEmailAndPassword(
-     $("email").value,
-     $("senha").value
-   );
- }catch(e){alert(e.message);}
+function tab(t){
+if(t==="painel") painel();
+if(t==="atendimento") atendimento();
+if(t==="resultados") resultados();
+if(t==="config") config();
 }
-window.doLogin=doLogin;
+window.tab=tab;
 
-/* ===== APP ===== */
-function renderApp(){
- $("app").innerHTML=`
- <div id="view"></div>
-
- <div class="menu">
-   <button onclick="goTab('painel')">🏠</button>
-   <button onclick="goTab('atendimento')">☎️</button>
-   <button onclick="goTab('resultados')">📊</button>
-   <button onclick="goTab('config')">⚙️</button>
- </div>
- `;
- goTab("painel");
+/* PAINEL */
+function painel(){
+view.inner emphasize =`
+<div class="card">
+<h2>Painel</h2>
+<button class="btn btnGreen" onclick="setAtivo(true)">ATIVO</button>
+<button class="btn btnRed" onclick="setAtivo(false)">PAUSADO</button>
+</div>`;
 }
+window.setAtivo=async v=>{
+await db.collection("users").doc(auth.currentUser.uid).update({ativo:v});
+alert(v?"Ativo":"Pausado");
+};
 
-function goTab(tab){
- if(tab==="painel") renderPainel();
- if(tab==="atendimento") renderAtendimento();
- if(tab==="resultados") renderResultados();
- if(tab==="config") renderConfig();
-}
-window.goTab=goTab;
+/* ATENDIMENTO */
+function atendimento(){
+view.innerHTML=`<div class="card">
+<h2>Atendimento</h2>
 
-/* ===== PAINEL ===== */
-function renderPainel(){
- $("view").innerHTML=`
- <div class="card">
-   <h2>Painel</h2>
-   <button class="btn btnGreen" onclick="setAtivo(true)">ATIVO</button>
-   <button class="btn btnRed" onclick="setAtivo(false)">PAUSADO</button>
- </div>`;
+<select id="fonte">
+<option value="geral">Lista Geral</option>
+<option value="gerente">Lista Gerente</option>
+<option value="minha">Minha Lista</option>
+</select>
+
+<button class="btn btnGold" onclick="pegarLead()">PEGAR LEAD</button>
+
+<div id="leadBox"></div>
+</div>`;
 }
 
-async function setAtivo(v){
- await db.collection("users")
- .doc(auth.currentUser.uid)
- .update({ativo:v});
-}
-window.setAtivo=setAtivo;
+window.pegarLead=async()=>{
+let q=db.collection("leads").where("status","==","fila");
 
-/* ===== ATENDIMENTO ===== */
-function renderAtendimento(){
- $("view").innerHTML=`
- <div class="card">
- <h2>Atendimento</h2>
+const fonte=fonteEl();
+if(fonte==="geral") q=q.where("origem","==","geral");
+if(fonte==="gerente") q=q.where("origem","==","gerente");
+if(fonte==="minha") q=q.where("origem","==","corretor");
 
- <select id="fonte" style="width:100%;padding:10px">
-   <option value="geral">Lista Geral</option>
-   <option value="gerente">Lista Gerente</option>
-   <option value="minha">Minha Lista</option>
- </select>
+const snap=await q.limit(1).get();
 
- <button class="btn btnGold" onclick="pegarLead()">PEGAR LEAD</button>
+if(snap.empty){leadBox.innerHTML="Sem leads.";return;}
 
- <div id="leadBox"></div>
- </div>`;
-}
+const d=snap.docs[0];
+leadAtual={id:d.id,...d.data()};
 
-async function pegarLead(){
+await d.ref.update({status:"em atendimento",corretorId:auth.currentUser.uid});
 
- const snap=await db.collection("leads")
- .where("status","==","fila")
- .limit(1).get();
+renderLead();
+};
 
- if(snap.empty){
-   $("leadBox").innerHTML="Sem leads.";
-   return;
- }
-
- const doc=snap.docs[0];
- leadAtual={id:doc.id,...doc.data()};
-
- await doc.ref.update({
-   status:"em atendimento",
-   corretorId:auth.currentUser.uid
- });
-
- renderLead();
-}
-window.pegarLead=pegarLead;
+function fonteEl(){return $("fonte").value;}
 
 function renderLead(){
+const tel=clean(leadAtual.telefone);
+const msg=encodeURIComponent(userData.mensagemPadrao||"");
 
- const tel=cleanPhone(leadAtual.telefone);
- const msg=encodeURIComponent(userData.mensagemPadrao||"");
+leadBox.innerHTML=`
+<h3>${leadAtual.nome}</h3>
+<div>${leadAtual.telefone}</div>
+<div>${leadAtual.email||""}</div>
 
- $("leadBox").innerHTML=`
- <h3>${leadAtual.nome||""}</h3>
- <div>${leadAtual.telefone||""}</div>
- <div>${leadAtual.email||""}</div>
+<a href="tel:${tel}"><button class="btn btnBlue">📞 LIGAR</button></a>
+<a target="_blank" href="https://wa.me/55${tel}?text=${msg}">
+<button class="btn btnBlue">💬 WHATSAPP</button></a>
+<a href="sms:${tel}?body=${msg}">
+<button class="btn btnBlue">📩 SMS</button></a>
+<a href="mailto:${leadAtual.email||""}?subject=PROEFI&body=${msg}">
+<button class="btn btnBlue">📧 EMAIL</button></a>
 
- <a href="tel:${tel}">
- <button class="btn btnBlue">📞 LIGAR</button></a>
+<button class="btn btnGreen" onclick="agendamentoUI()">ATENDEU - AGENDAMENTO</button>
+<button class="btn btnGold" onclick="promessaUI()">ATENDEU - PROMESSA</button>
+<button class="btn btnRed" onclick="naoAtendeu()">NÃO ATENDEU</button>
 
- <a target="_blank"
- href="https://wa.me/55${tel}?text=${msg}">
- <button class="btn btnBlue">💬 WHATSAPP</button></a>
-
- <a href="sms:${tel}?body=${msg}">
- <button class="btn btnBlue">📩 SMS</button></a>
-
- <a href="mailto:${leadAtual.email||""}?subject=PROEFI&body=${msg}">
- <button class="btn btnBlue">📧 EMAIL</button></a>
-
- <button class="btn btnGreen" onclick="finalizar('AGENDAMENTO')">
- FINALIZAR AGENDAMENTO
- </button>
-
- <button class="btn btnGold" onclick="finalizar('PROMESSA')">
- FINALIZAR PROMESSA
- </button>
-
- <button class="btn btnRed" onclick="naoAtendeu()">
- NÃO ATENDEU
- </button>
- `;
+<div id="extra"></div>
+`;
 }
 
-/* ===== FINALIZAÇÃO ===== */
-async function finalizar(tipo){
- if(!leadAtual) return;
+window.agendamentoUI=()=>{
+extra.innerHTML=`
+<input type="date" id="dataAg">
+<input type="time" id="horaAg">
+<button class="btn btnGreen" onclick="finalizarAg()">CONFIRMAR AGENDAMENTO</button>`;
+};
 
- await db.collection("leads")
- .doc(leadAtual.id)
- .update({
-   status:"finalizado",
-   resultado:tipo,
-   atendeu:true,
-   timestampFinalizacao:Date.now()
- });
+window.promessaUI=()=>{
+extra.innerHTML=`
+<textarea id="obs" placeholder="Observação obrigatória"></textarea>
+<button class="btn btnGold" onclick="finalizarProm()">CONFIRMAR PROMESSA</button>`;
+};
 
- leadAtual=null;
- renderAtendimento();
-}
-window.finalizar=finalizar;
+window.finalizarAg=async()=>{
+if(!dataAg.value||!horaAg.value){alert("Preencha data e hora");return;}
+await finalizar("AGENDAMENTO",{data:dataAg.value,hora:horaAg.value});
+};
 
-async function naoAtendeu(){
- if(!leadAtual) return;
+window.finalizarProm=async()=>{
+if(!obs.value){alert("Observação obrigatória");return;}
+await finalizar("PROMESSA",{obs:obs.value});
+};
 
- await db.collection("leads")
- .doc(leadAtual.id)
- .update({
-   status:"fila",
-   corretorId:null
- });
-
- leadAtual=null;
- renderAtendimento();
-}
-window.naoAtendeu=naoAtendeu;
-
-/* ===== RESULTADOS ===== */
-function renderResultados(){
- $("view").innerHTML=`
- <div class="card">
- <h2>Resultados</h2>
- Mini CRM (próxima etapa)
- </div>`;
-}
-
-/* ===== CONFIG ===== */
-function renderConfig(){
- $("view").innerHTML=`
- <div class="card">
- <h2>Mensagem padrão</h2>
- <textarea id="msg"
- style="width:100%;height:80px">${userData.mensagemPadrao||""}</textarea>
-
- <button class="btn btnBlue" onclick="salvarMsg()">SALVAR</button>
- </div>`;
-}
-
-async function salvarMsg(){
- await db.collection("users")
- .doc(auth.currentUser.uid)
- .update({mensagemPadrao:$("msg").value});
-
- userData.mensagemPadrao=$("msg").value;
- alert("Mensagem salva");
-}
-window.salvarMsg=salvarMsg;
-
-/* ===== AUTH ===== */
-auth.onAuthStateChanged(async user=>{
-
- if(!user){
-   renderLogin();
-   return;
- }
-
- const doc=await db.collection("users")
- .doc(user.uid).get();
-
- if(!doc.exists){
-   alert("Usuário não autorizado");
-   auth.signOut();
-   return;
- }
-
- userData=doc.data();
- renderApp();
+async function finalizar(tipo,extra={}){
+await db.collection("leads").doc(leadAtual.id).update({
+status:"finalizado",
+resultado:tipo,
+extra
 });
+leadAtual=null;
+atendimento();
+}
 
+window.naoAtendeu=async()=>{
+await db.collection("leads").doc(leadAtual.id).update({
+status:"fila",
+corretorId:null
+});
+leadAtual=null;
+atendimento();
+};
+
+/* RESULTADOS */
+function resultados(){
+view.innerHTML=`<div class="card"><h2>Resultados</h2>Mini CRM em breve</div>`;
+}
+
+/* CONFIG */
+function config(){
+view.innerHTML=`
+<div class="card">
+<h2>Mensagem padrão</h2>
+<textarea id="msg">${userData.mensagemPadrao||""}</textarea>
+<button class="btn btnBlue" onclick="saveMsg()">SALVAR</button>
+</div>
+
+<div class="card">
+<h2>Upload Lista</h2>
+<input type="file" id="file">
+<button class="btn btnGold" onclick="upload()">UPLOAD</button>
+</div>`;
+}
+
+window.saveMsg=async()=>{
+await db.collection("users").doc(auth.currentUser.uid)
+.update({mensagemPadrao:msg.value});
+alert("Salvo");
+};
+
+window.upload=()=>alert("Upload pronto (base ativa)");
+
+/* AUTH */
+auth.onAuthStateChanged(async u=>{
+if(!u){login();return;}
+const doc=await db.collection("users").doc(u.uid).get();
+if(!doc.exists){auth.signOut();return;}
+userData=doc.data();
+appUI();
+});
 </script>
 </body>
 </html>
