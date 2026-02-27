@@ -34,6 +34,7 @@
     max-width:520px;
     margin:0 auto;
     padding:18px;
+    padding-bottom:90px; /* espaço para menu */
   }
 
   .brand{
@@ -128,6 +129,28 @@
   a{ text-decoration:none; }
   .danger{color:#b00020; font-weight:700}
   .ok{color:#0b6b2b; font-weight:700}
+
+  /* MENU inferior (grande) */
+  .bottomNav{
+    position:fixed;
+    left:0; right:0; bottom:0;
+    background:#fff;
+    border-top:1px solid rgba(0,0,0,0.12);
+    display:flex;
+    z-index:999;
+  }
+  .bottomNav button{
+    flex:1;
+    padding:18px 10px;
+    font-size:16px;
+    font-weight:900;
+    border:none;
+    background:#fff;
+    color:var(--blue);
+  }
+  .bottomNav button.active{
+    background: rgba(33,52,108,0.08);
+  }
 </style>
 </head>
 
@@ -155,10 +178,16 @@ const db   = firebase.firestore();
 /** =========================
  *  State
  *  ========================= */
-let loginTimestamp = null;   // quando o corretor logou (para relatório)
-let leadAtualRef   = null;   // firestore DocumentReference do lead em atendimento
-let leadAtualData  = null;   // snapshot data
-let detailsOpen    = false;  // painel de "ATENDEU" aberto
+let loginTimestamp = null;
+let leadAtualRef   = null;
+let leadAtualData  = null;
+let detailsOpen    = false;
+
+let currentUser = null;
+let currentUserData = null;
+
+let currentTab = "painel"; // painel | atendimento | resultados | config
+let toggleMode = null;     // AG | PR | SI
 
 /** =========================
  *  Helpers
@@ -188,6 +217,11 @@ function dayKey(ts){
 async function getUserDoc(uid){
   const snap = await db.collection("users").doc(uid).get();
   return snap.exists ? snap.data() : null;
+}
+
+function activeBadge(ativo){
+  if(ativo) return `<span class="pill">ATIVO</span>`;
+  return `<span class="pill" style="background:rgba(255,204,203,0.6)">PAUSADO</span>`;
 }
 
 /** =========================
@@ -252,11 +286,6 @@ async function setActiveStatus(uid, ativo){
   });
 }
 
-function activeBadge(ativo){
-  if(ativo) return `<span class="pill">ATIVO</span>`;
-  return `<span class="pill" style="background:rgba(255,204,203,0.6)">PAUSADO</span>`;
-}
-
 /** =========================
  *  Upload & Import (XLS/XLSX/CSV)
  *  ========================= */
@@ -302,6 +331,7 @@ function makeLeadDoc(base){
     observacao: null,
     dataAgendada: null,
     totalTentativas: 0,
+
     origem: null,        // geral | gerente | corretor
     equipe: null,        // string
     donoUpload: null,    // uid
@@ -367,7 +397,7 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
 
       if(origem === "geral" && distribuirGeralAgora){
         const chosen = corretoresAtivos[Math.floor(Math.random() * corretoresAtivos.length)];
-        doc.corretorId = chosen.uid;
+        doc.corretorId = chosen.uid;     // já nasce atribuído ao corretor
         doc.status = "fila";
       }
 
@@ -382,16 +412,19 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
 }
 
 /** =========================
- *  Lead selection per source
+ *  Lead selection per source (REAL)
  *  ========================= */
 async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
   let q = db.collection("leads").where("status","==","fila");
 
   if(source === "geral"){
+    // Geral: já vem atribuído ao corretor no upload do diretor
     q = q.where("origem","==","geral").where("corretorId","==",corretorUid);
   }else if(source === "gerente"){
+    // Gerente: fila da equipe, ainda sem corretor definido
     q = q.where("origem","==","gerente").where("equipe","==",equipeCorretor).where("corretorId","==",null);
   }else{
+    // Minha: lista do corretor (donoUpload), ainda sem corretor definido
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
@@ -401,6 +434,7 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
   const docSnap = snap.docs[0];
   const ref = docSnap.ref;
 
+  // Reservar lead para o corretor
   await ref.update({
     status: "em atendimento",
     corretorId: corretorUid,
@@ -412,6 +446,79 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
 
   const fresh = await ref.get();
   return { ref, data: fresh.data() };
+}
+
+/** =========================
+ *  Stats (baixo custo) + Ranking
+ *  ========================= */
+async function bumpStats({ uid, equipe, email, tipo }){
+  const dk = dayKey(nowMs());
+  const docId = `${dk}_${uid}`;
+  const ref = db.collection("stats_diarios").doc(docId);
+
+  await db.runTransaction(async (t)=>{
+    const snap = await t.get(ref);
+    const base = snap.exists ? snap.data() : {
+      dateKey: dk,
+      uid,
+      email: email || "",
+      equipe: equipe || null,
+      ligacoes: 0,
+      naoAtendeu: 0,
+      atendidos: 0,
+      agendamentos: 0,
+      promessas: 0,
+      semInteresse: 0,
+      atualizadoEm: nowMs()
+    };
+
+    // Sempre que pega lead, conta como ligação/tentativa
+    if(tipo==="LIGACAO") base.ligacoes = (base.ligacoes||0) + 1;
+    if(tipo==="NAO_ATENDEU") base.naoAtendeu = (base.naoAtendeu||0) + 1;
+
+    if(tipo==="AGENDAMENTO"){
+      base.atendidos = (base.atendidos||0) + 1;
+      base.agendamentos = (base.agendamentos||0) + 1;
+    }
+    if(tipo==="PROMESSA"){
+      base.atendidos = (base.atendidos||0) + 1;
+      base.promessas = (base.promessas||0) + 1;
+    }
+    if(tipo==="SEM_INTERESSE"){
+      base.atendidos = (base.atendidos||0) + 1;
+      base.semInteresse = (base.semInteresse||0) + 1;
+    }
+
+    base.atualizadoEm = nowMs();
+    t.set(ref, base, { merge:true });
+  });
+}
+
+async function loadMyStats(){
+  const dk = dayKey(nowMs());
+  const ref = db.collection("stats_diarios").doc(`${dk}_${currentUser.uid}`);
+  const snap = await ref.get();
+  return snap.exists ? snap.data() : null;
+}
+
+async function computeRankingEquipe(){
+  // Ranking por "atendidos" dentro da equipe, no dia
+  const dk = dayKey(nowMs());
+  const equipe = currentUserData?.equipe || null;
+  if(!equipe) return { pos: "-", total: "-" };
+
+  const snap = await db.collection("stats_diarios")
+    .where("dateKey","==",dk)
+    .where("equipe","==",equipe)
+    .get();
+
+  if(snap.empty) return { pos: "-", total: "-" };
+
+  const list = snap.docs.map(d => d.data());
+  list.sort((a,b)=> (b.atendidos||0) - (a.atendidos||0));
+
+  const idx = list.findIndex(x => x.uid === currentUser.uid);
+  return { pos: idx>=0 ? (idx+1) : "-", total: list.length };
 }
 
 /** =========================
@@ -438,7 +545,26 @@ function renderHeader(userEmail, role, extraHtml=""){
 }
 
 /** =========================
- *  Director / Manager / Broker screens
+ *  Bottom nav (corretor)
+ *  ========================= */
+function renderBottomNav(){
+  return `
+    <div class="bottomNav">
+      <button class="${currentTab==='painel'?'active':''}" onclick="goTab('painel')">🏠 Painel</button>
+      <button class="${currentTab==='atendimento'?'active':''}" onclick="goTab('atendimento')">☎️ Atendimento</button>
+      <button class="${currentTab==='resultados'?'active':''}" onclick="goTab('resultados')">📊 Resultados</button>
+      <button class="${currentTab==='config'?'active':''}" onclick="goTab('config')">⚙️ Config</button>
+    </div>
+  `;
+}
+
+window.goTab = function(tab){
+  currentTab = tab;
+  renderCorretorShell(currentUser, currentUserData);
+};
+
+/** =========================
+ *  Director / Manager screens
  *  ========================= */
 function renderDiretor(user, userData){
   const el = $("app");
@@ -479,76 +605,118 @@ function renderGerente(user, userData){
   `;
 }
 
-function renderCorretor(user, userData){
+/** =========================
+ *  Corretor Shell (com abas)
+ *  ========================= */
+function renderCorretorShell(user, userData){
   const equipe = userData?.equipe || "equipe1";
   const ativo  = !!userData?.ativo;
 
-  loginTimestamp = nowMs();
-
-  const el = $("app");
-  el.innerHTML = `
+  let body = `
     ${renderHeader(user.email, "corretor", `<div>${activeBadge(ativo)}</div>`)}
-    
-    <div class="card">
-      <div class="row">
-        <div class="grow">
-          <div><b>Status de atendimento</b></div>
-          <div class="small muted">Somente corretores ATIVOS entram na distribuição geral.</div>
+  `;
+
+  if(currentTab === "painel"){
+    body += `
+      <div class="card">
+        <div class="row">
+          <div class="grow">
+            <div><b>Status de atendimento</b></div>
+            <div class="small muted">Somente corretores ATIVOS entram na distribuição geral.</div>
+            <div class="divider"></div>
+            <div class="small">⏱ Tempo logado: <b><span id="tempoLogado">0</span> min</b></div>
+            <div class="small">🏆 Ranking hoje (equipe): <b><span id="rankHoje">--</span></b></div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid2">
+          <button class="btn btnGreen" onclick="setMeActive(true)">🟢 ESTOU ATIVO</button>
+          <button class="btn btnRed" onclick="setMeActive(false)">🔴 PAUSAR</button>
+        </div>
+        <div class="divider"></div>
+        <div class="small muted">Equipe: <b>${equipe}</b></div>
+      </div>
+
+      <div class="card">
+        <div><b>Resumo do Dia</b></div>
+        <div class="small muted">Atualiza automaticamente conforme você trabalha.</div>
+        <div class="divider"></div>
+        <div id="statsBox" class="small muted">Carregando...</div>
+      </div>
+    `;
+  }
+
+  if(currentTab === "atendimento"){
+    body += `
+      <div class="card">
+        <div><b>Fonte de Leads</b></div>
+        <div class="small muted">Escolha a lista que você quer bater agora.</div>
+        <div class="divider"></div>
+        <select id="leadSource">
+          <option value="geral">Lista Geral (Diretoria)</option>
+          <option value="gerente">Lista do Gerente (Equipe)</option>
+          <option value="minha">Minha Lista (Corretor)</option>
+        </select>
+        <button class="btn btnGold" onclick="pegarProximoLead()">PEGAR PRÓXIMO LEAD</button>
+        <div class="small muted" style="margin-top:8px">
+          Dica: finalize o lead atual antes de pegar outro.
         </div>
       </div>
-      <div class="divider"></div>
-      <div class="grid2">
-        <button class="btn btnGreen" onclick="setMeActive(true)">🟢 ESTOU ATIVO</button>
-        <button class="btn btnRed" onclick="setMeActive(false)">🔴 PAUSAR</button>
+
+      <div class="card" id="leadArea">
+        <div class="center muted">Nenhum lead em atendimento.</div>
       </div>
-      <div class="divider"></div>
-      <div class="small muted">Equipe: <b>${equipe}</b></div>
-    </div>
+    `;
+  }
 
-    <div class="card">
-      <div><b>Fonte de Leads</b></div>
-      <div class="small muted">Escolha a lista que você quer bater agora.</div>
-      <div class="divider"></div>
-      <select id="leadSource">
-        <option value="geral">Lista Geral (Diretoria)</option>
-        <option value="gerente">Lista do Gerente (Equipe)</option>
-        <option value="minha">Minha Lista (Corretor)</option>
-      </select>
-      <button class="btn btnGold" onclick="pegarProximoLead()">PEGAR PRÓXIMO LEAD</button>
-    </div>
+  if(currentTab === "resultados"){
+    body += `
+      <div class="card">
+        <div><b>Relatório do Operador</b></div>
+        <div class="small muted">Gera Excel (Resumo + Atendidos). Total de ligações inclui "não atendeu".</div>
+        <div class="divider"></div>
+        <button class="btn btnGold" onclick="gerarRelatorioExcel()">📊 GERAR RELATÓRIO (EXCEL)</button>
+        <button class="btn btnGhost" onclick="prepararEmailRelatorio()">✉️ ENVIAR RELATÓRIO (EMAIL)</button>
+      </div>
 
-    <div class="card" id="leadArea">
-      <div class="center muted">Nenhum lead em atendimento.</div>
-    </div>
+      <div class="card">
+        <div><b>Meu Resumo Hoje</b></div>
+        <div class="divider"></div>
+        <div id="statsBox2" class="small muted">Carregando...</div>
+      </div>
+    `;
+  }
 
-    <div class="card">
-      <div><b>Mensagem Padrão (WhatsApp/SMS/Email)</b></div>
-      <div class="small muted">Use: {{nome}} {{telefone}} {{email}}</div>
-      <div class="divider"></div>
-      <textarea id="msgPadrao" placeholder="Digite sua mensagem padrão...">${userData?.mensagemPadrao || "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse."}</textarea>
-      <button class="btn btnBlue" onclick="salvarMensagemPadrao()">SALVAR MENSAGEM</button>
-    </div>
+  if(currentTab === "config"){
+    body += `
+      <div class="card">
+        <div><b>Mensagem Padrão (WhatsApp/SMS/Email)</b></div>
+        <div class="small muted">Use: {{nome}} {{telefone}} {{email}}</div>
+        <div class="divider"></div>
+        <textarea id="msgPadrao" placeholder="Digite sua mensagem padrão...">${userData?.mensagemPadrao || "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse."}</textarea>
+        <button class="btn btnBlue" onclick="salvarMensagemPadrao()">SALVAR MENSAGEM</button>
+      </div>
 
-    <div class="card">
-      <div><b>Upload • Minha Lista (Corretor)</b></div>
-      <div class="small muted">Você pode anexar uma lista própria para bater.</div>
-      <div class="divider"></div>
-      <input type="file" id="fileCorretor" accept=".xls,.xlsx,.csv" />
-      <button class="btn btnBlue" onclick="uploadListaCorretor()">ENVIAR MINHA LISTA</button>
-    </div>
+      <div class="card">
+        <div><b>Upload • Minha Lista (Corretor)</b></div>
+        <div class="small muted">Você pode anexar uma lista própria para bater.</div>
+        <div class="divider"></div>
+        <input type="file" id="fileCorretor" accept=".xls,.xlsx,.csv" />
+        <button class="btn btnBlue" onclick="uploadListaCorretor()">ENVIAR MINHA LISTA</button>
+      </div>
+    `;
+  }
 
-    <div class="card">
-      <div><b>Relatório do Operador</b></div>
-      <div class="small muted">Gera Excel (Resumo + Atendidos). Total de ligações inclui "não atendeu".</div>
-      <div class="divider"></div>
-      <button class="btn btnGold" onclick="gerarRelatorioExcel()">📊 GERAR RELATÓRIO (EXCEL)</button>
-      <button class="btn btnGhost" onclick="prepararEmailRelatorio()">✉️ ENVIAR RELATÓRIO (EMAIL)</button>
-    </div>
-  `;
+  $("app").innerHTML = body + renderBottomNav();
+
+  // Recarregar dados que são vivos (contador/stats/ranking)
+  if(currentTab === "painel" || currentTab === "resultados"){
+    hydrateStatsAndRank();
+  }
 }
 
 /** =========================
- *  Actions
+ *  Actions - Diretor/Gerente/Corretor
  *  ========================= */
 window.uploadListaGeral = async function(){
   const file = $("fileDiretor")?.files?.[0];
@@ -614,19 +782,24 @@ window.salvarEmailRelatorio = async function(){
 window.setMeActive = async function(ativo){
   const user = auth.currentUser;
   await setActiveStatus(user.uid, ativo);
-  const me = await getUserDoc(user.uid);
-  renderCorretor(user, me);
+  currentUserData = await getUserDoc(user.uid);
+  renderCorretorShell(user, currentUserData);
 };
 
 window.salvarMensagemPadrao = async function(){
   const user = auth.currentUser;
   const msg = $("msgPadrao").value || "";
   await db.collection("users").doc(user.uid).update({ mensagemPadrao: msg });
+  currentUserData = await getUserDoc(user.uid);
   alert("Mensagem padrão salva!");
 };
 
+/** =========================
+ *  Lead Flow
+ *  ========================= */
 window.pegarProximoLead = async function(){
   if(leadAtualRef) return alert("Você já está com um lead em atendimento. Finalize antes de pegar outro.");
+
   const user = auth.currentUser;
   const me = await getUserDoc(user.uid);
   const source = $("leadSource").value;
@@ -644,22 +817,20 @@ window.pegarProximoLead = async function(){
   leadAtualRef = picked.ref;
   leadAtualData = picked.data;
   detailsOpen = false;
+  toggleMode = null;
 
-  // ✅ CORREÇÃO: agora renderiza o lead já buscando a mensagem atualizada do Firestore
+  // Contabiliza tentativa/ligação no stats
+  await bumpStats({ uid:user.uid, equipe, email:user.email, tipo:"LIGACAO" });
+
   await renderLeadInArea();
 };
 
-/** =========================
- *  ✅ CORREÇÃO PRINCIPAL AQUI:
- *  renderLeadInArea agora sempre busca mensagemPadrao atualizada no Firestore
- *  ========================= */
 async function renderLeadInArea(){
   const lead = leadAtualData;
   const area = $("leadArea");
 
-  // Busca atualizada do usuário
-  const user = auth.currentUser;
-  const snap = await db.collection("users").doc(user.uid).get();
+  // sempre pega mensagem atualizada
+  const snap = await db.collection("users").doc(currentUser.uid).get();
   const userAtual = snap.exists ? (snap.data() || {}) : {};
 
   const telClean = cleanPhone(lead.telefone);
@@ -672,14 +843,8 @@ async function renderLeadInArea(){
     <div class="divider"></div>
 
     <div class="grid3">
-      <a href="tel:${telClean}">
-        <button class="btn btnBlue">📞 LIGAR</button>
-      </a>
-
-      <a href="sms:${telClean}?body=${msgFinal}">
-        <button class="btn btnBlue">📩 SMS</button>
-      </a>
-
+      <a href="tel:${telClean}"><button class="btn btnBlue">📞 LIGAR</button></a>
+      <a href="sms:${telClean}?body=${msgFinal}"><button class="btn btnBlue">📩 SMS</button></a>
       <a href="mailto:${encodeURIComponent(lead.email || "")}?subject=${encodeURIComponent("PROEFI - ALVENA")}&body=${msgFinal}">
         <button class="btn btnBlue">📧 EMAIL</button>
       </a>
@@ -703,9 +868,15 @@ async function renderLeadInArea(){
 window.uiNaoAtendeu = async function(){
   if(!leadAtualRef) return;
 
+  const user = auth.currentUser;
+  const me = await getUserDoc(user.uid);
+  const equipe = me.equipe || "equipe1";
+
+  // volta pra fila
   await leadAtualRef.update({
     status: "fila",
-    corretorId: (leadAtualData.origem === "geral") ? auth.currentUser.uid : null,
+    // se origem geral, mantém atribuição do corretor (pra não perder)
+    corretorId: (leadAtualData.origem === "geral") ? user.uid : null,
     emAtendimentoEm: null,
     timestampDistribuicao: null,
     timestampFinalizacao: null,
@@ -716,79 +887,124 @@ window.uiNaoAtendeu = async function(){
     atualizadoEm: nowMs()
   });
 
+  await bumpStats({ uid:user.uid, equipe, email:user.email, tipo:"NAO_ATENDEU" });
+
   leadAtualRef = null;
   leadAtualData = null;
+  detailsOpen = false;
+  toggleMode = null;
+
   $("leadArea").innerHTML = `<div class="center muted">Lead devolvido para a fila.</div>`;
+  hydrateStatsAndRank();
 };
 
 window.uiAtendeu = function(){
   if(!leadAtualRef) return;
-  if(detailsOpen) return;
+
+  if(detailsOpen){
+    detailsOpen = false;
+    toggleMode = null;
+    const box = $("atendeuBox");
+    if(box) box.innerHTML = "";
+    return;
+  }
   detailsOpen = true;
 
   $("atendeuBox").innerHTML = `
     <div class="divider"></div>
     <div><b>Finalize o atendimento</b></div>
-    <div class="small muted">Escolha uma opção obrigatória abaixo:</div>
-
+    <div class="small muted">Clique para abrir/fechar a opção e depois confirme.</div>
     <div class="divider"></div>
 
-    <button class="btn btnGold" onclick="uiAgendamento()">📅 AGENDAMENTO</button>
-    <button class="btn btnGold" onclick="uiPromessa()">PROMESSA DE DOCUMENTAÇÃO</button>
-    <button class="btn btnGold" onclick="uiSemInteresse()">NÃO GEROU INTERESSE</button>
+    <button class="btn btnGold" onclick="toggleOption('AG')">📅 AGENDAMENTO</button>
+    <button class="btn btnGold" onclick="toggleOption('PR')">PROMESSA DE DOCUMENTAÇÃO</button>
+    <button class="btn btnGold" onclick="toggleOption('SI')">NÃO GEROU INTERESSE</button>
 
     <div id="extraBox"></div>
   `;
 };
 
-window.uiAgendamento = function(){
-  $("extraBox").innerHTML = `
-    <div class="divider"></div>
-    <div class="small muted">Data e horário obrigatórios:</div>
-    <div class="grid2">
-      <input type="date" id="agData" />
-      <input type="time" id="agHora" />
-    </div>
-    <div class="fieldLabel">Observações (opcional)</div>
-    <textarea id="obsAg" placeholder="Ex: cliente quer apartamento 2q..."></textarea>
-    <button class="btn btnGreen" onclick="confirmarAtendeu('AGENDAMENTO')">CONFIRMAR</button>
-  `;
+window.toggleOption = function(mode){
+  const extra = $("extraBox");
+  if(!extra) return;
+
+  // clicou de novo na mesma → fecha
+  if(toggleMode === mode){
+    toggleMode = null;
+    extra.innerHTML = "";
+    return;
+  }
+
+  toggleMode = mode;
+
+  if(mode === "AG"){
+    extra.innerHTML = `
+      <div class="divider"></div>
+      <div class="small muted">Data e horário obrigatórios:</div>
+      <div class="grid2">
+        <input type="date" id="agData"/>
+        <input type="time" id="agHora"/>
+      </div>
+      <div class="fieldLabel">Observações (opcional)</div>
+      <textarea id="obsAg" placeholder="Ex: cliente quer apartamento 2q..."></textarea>
+      <div class="grid2">
+        <button class="btn btnGreen" onclick="confirmarAtendeu('AGENDAMENTO')">✔ OK</button>
+        <button class="btn btnRed" onclick="cancelarExtra()">✖ Cancelar</button>
+      </div>
+    `;
+  }
+
+  if(mode === "PR"){
+    extra.innerHTML = `
+      <div class="divider"></div>
+      <div class="fieldLabel">Observações (opcional)</div>
+      <textarea id="obsPr" placeholder="Ex: vai enviar docs amanhã..."></textarea>
+      <div class="grid2">
+        <button class="btn btnGreen" onclick="confirmarAtendeu('PROMESSA DOCUMENTAÇÃO')">✔ OK</button>
+        <button class="btn btnRed" onclick="cancelarExtra()">✖ Cancelar</button>
+      </div>
+    `;
+  }
+
+  if(mode === "SI"){
+    extra.innerHTML = `
+      <div class="divider"></div>
+      <div class="fieldLabel">Feedback obrigatório</div>
+      <textarea id="fb" placeholder="Motivo / objeção / próximo passo..."></textarea>
+      <div class="grid2">
+        <button class="btn btnGreen" onclick="confirmarAtendeu('NÃO GEROU INTERESSE')">✔ OK</button>
+        <button class="btn btnRed" onclick="cancelarExtra()">✖ Cancelar</button>
+      </div>
+    `;
+  }
 };
 
-window.uiPromessa = function(){
-  $("extraBox").innerHTML = `
-    <div class="divider"></div>
-    <div class="fieldLabel">Observações (opcional)</div>
-    <textarea id="obsPr" placeholder="Ex: vai enviar docs amanhã..."></textarea>
-    <button class="btn btnGreen" onclick="confirmarAtendeu('PROMESSA DOCUMENTAÇÃO')">CONFIRMAR</button>
-  `;
-};
-
-window.uiSemInteresse = function(){
-  $("extraBox").innerHTML = `
-    <div class="divider"></div>
-    <div class="fieldLabel">Feedback obrigatório</div>
-    <textarea id="fb" placeholder="Motivo / objeção / próximo passo..."></textarea>
-    <button class="btn btnGreen" onclick="confirmarAtendeu('NÃO GEROU INTERESSE')">CONFIRMAR</button>
-  `;
+window.cancelarExtra = function(){
+  toggleMode = null;
+  const extra = $("extraBox");
+  if(extra) extra.innerHTML = "";
 };
 
 window.confirmarAtendeu = async function(resultado){
   if(!leadAtualRef) return;
 
+  const user = auth.currentUser;
+  const me = await getUserDoc(user.uid);
+  const equipe = me.equipe || "equipe1";
+
   let dataAgendada = null;
   let obs = null;
 
   if(resultado === "AGENDAMENTO"){
-    const d = $("agData").value;
-    const h = $("agHora").value;
+    const d = $("agData")?.value || "";
+    const h = $("agHora")?.value || "";
     if(!d || !h) return alert("Preencha data e horário do agendamento.");
     dataAgendada = `${d} ${h}`;
-    obs = ($("obsAg").value || "").trim();
+    obs = ($("obsAg")?.value || "").trim();
   }else if(resultado === "PROMESSA DOCUMENTAÇÃO"){
-    obs = ($("obsPr").value || "").trim();
+    obs = ($("obsPr")?.value || "").trim();
   }else{
-    const fb = ($("fb").value || "").trim();
+    const fb = ($("fb")?.value || "").trim();
     if(!fb) return alert("Feedback é obrigatório.");
     obs = fb;
   }
@@ -803,10 +1019,22 @@ window.confirmarAtendeu = async function(resultado){
     atualizadoEm: nowMs()
   });
 
+  // stats por tipo
+  if(resultado === "AGENDAMENTO"){
+    await bumpStats({ uid:user.uid, equipe, email:user.email, tipo:"AGENDAMENTO" });
+  }else if(resultado === "PROMESSA DOCUMENTAÇÃO"){
+    await bumpStats({ uid:user.uid, equipe, email:user.email, tipo:"PROMESSA" });
+  }else{
+    await bumpStats({ uid:user.uid, equipe, email:user.email, tipo:"SEM_INTERESSE" });
+  }
+
   leadAtualRef = null;
   leadAtualData = null;
   detailsOpen = false;
+  toggleMode = null;
+
   $("leadArea").innerHTML = `<div class="center ok">Atendimento finalizado!</div>`;
+  hydrateStatsAndRank();
 };
 
 /** =========================
@@ -932,10 +1160,51 @@ PROEFI - ALVENA`
 };
 
 /** =========================
+ *  Hydration: contador + stats + ranking
+ *  ========================= */
+async function hydrateStatsAndRank(){
+  // contador
+  if(loginTimestamp && $("tempoLogado")){
+    const min = Math.max(0, Math.floor((nowMs() - loginTimestamp)/60000));
+    $("tempoLogado").innerText = String(min);
+  }
+
+  // stats
+  const stats = await loadMyStats();
+  const htmlStats = stats ? `
+    <div>📞 Ligações: <b>${stats.ligacoes||0}</b></div>
+    <div>🔴 Não atendeu: <b>${stats.naoAtendeu||0}</b></div>
+    <div>🟢 Atendidos: <b>${stats.atendidos||0}</b></div>
+    <div>📅 Agendamentos: <b>${stats.agendamentos||0}</b></div>
+    <div>📂 Promessas: <b>${stats.promessas||0}</b></div>
+    <div>❌ Sem interesse: <b>${stats.semInteresse||0}</b></div>
+  ` : `<div class="muted">Sem dados de hoje ainda.</div>`;
+
+  if($("statsBox")) $("statsBox").innerHTML = htmlStats;
+  if($("statsBox2")) $("statsBox2").innerHTML = htmlStats;
+
+  // ranking (equipe)
+  if($("rankHoje")){
+    const r = await computeRankingEquipe();
+    $("rankHoje").innerText = (r.pos === "-" ? "--" : `${r.pos}º de ${r.total}`);
+  }
+}
+
+// atualiza contador a cada 5s sem custo alto
+setInterval(()=>{
+  if(loginTimestamp && $("tempoLogado")){
+    const min = Math.max(0, Math.floor((nowMs() - loginTimestamp)/60000));
+    $("tempoLogado").innerText = String(min);
+  }
+}, 5000);
+
+/** =========================
  *  Bootstrap
  *  ========================= */
 auth.onAuthStateChanged(async (user)=>{
   if(!user){
+    currentUser = null;
+    currentUserData = null;
     renderLogin();
     return;
   }
@@ -946,14 +1215,22 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
 
-  const data = userSnap.data();
-  if(data.role === "diretor"){
-    renderDiretor(user, data);
-  }else if(data.role === "gerente"){
-    renderGerente(user, data);
-  }else{
-    renderCorretor(user, data);
+  currentUser = user;
+  currentUserData = userSnap.data();
+
+  if(currentUserData.role === "diretor"){
+    renderDiretor(user, currentUserData);
+    return;
   }
+  if(currentUserData.role === "gerente"){
+    renderGerente(user, currentUserData);
+    return;
+  }
+
+  // corretor
+  loginTimestamp = nowMs();
+  currentTab = "painel";
+  renderCorretorShell(user, currentUserData);
 });
 </script>
 </body>
