@@ -35,7 +35,7 @@
     max-width:560px;
     margin:0 auto;
     padding:18px;
-    padding-bottom:95px; /* espaço do menu */
+    padding-bottom:95px;
   }
 
   .brand{
@@ -207,9 +207,8 @@ const db   = firebase.firestore();
  *  CONSTS / STATE
  *  ========================= */
 const DIRETOR_EMAIL_FIXO = "jo.alvenasolucoes@gmail.com";
-
-const NAO_ATENDEU_COOLDOWN_MS = 10 * 60 * 1000;   // não repetir lead "não atendeu" por 10 min
-const PICK_LIMIT = 25;                            // quantos candidatos buscar por vez
+const NAO_ATENDEU_COOLDOWN_MS = 10 * 60 * 1000;
+const PICK_LIMIT = 25;
 
 let currentUser = null;
 let currentUserData = null;
@@ -221,12 +220,12 @@ let leadAtualRef = null;
 let leadAtualData = null;
 let detailsOpen = false;
 
-let openOutcome = null; // "AGENDAMENTO" | "PROMESSA" | "SEM_INTERESSE" | null
+let openOutcome = null;
 let draftAgData = "";
 let draftAgHora = "";
 let draftObs = "";
 
-let lastLeadId = null; // evita repetir imediatamente
+let lastLeadId = null;
 
 /** =========================
  *  Helpers
@@ -330,6 +329,38 @@ async function ensureFixedDirector(user){
 }
 
 /** =========================
+ *  ✅ FIX: Garantir pendência (quando email já existe)
+ *  ========================= */
+async function ensurePendingUserDoc({ uid, email, nome, equipe, solicitadoRole }){
+  const ref = db.collection("users").doc(uid);
+  const snap = await ref.get();
+  const base = snap.exists ? (snap.data() || {}) : {};
+
+  // se já aprovado e com role final, não mexe
+  if(base.aprovado === true && base.role && base.role !== "pendente"){
+    return { status:"approved", data: base };
+  }
+
+  // cria/normaliza para pendente
+  const payload = {
+    nome: nome || base.nome || (email ? email.split("@")[0] : "Usuário"),
+    email: email || base.email || "",
+    equipe: equipe || base.equipe || "equipe1",
+    role: "pendente",
+    solicitadoRole: solicitadoRole || base.solicitadoRole || "corretor",
+    aprovado: false,
+    solicitadoEm: base.solicitadoEm || nowMs(),
+    ativo: false,
+    mensagemPadrao: base.mensagemPadrao || "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.",
+    atualizadoEm: nowMs(),
+    criadoEm: base.criadoEm || nowMs()
+  };
+
+  await ref.set(payload, { merge:true });
+  return { status:"pending", data: payload };
+}
+
+/** =========================
  *  AUTH UI
  *  ========================= */
 function renderLogin(){
@@ -361,6 +392,21 @@ window.doLogin = async function(){
   const senha = $("senha")?.value || "";
   try{
     await auth.signInWithEmailAndPassword(email, senha);
+
+    // ✅ se logou e não existe doc users, cria pendente automaticamente
+    const user = auth.currentUser;
+    if(user){
+      const snap = await db.collection("users").doc(user.uid).get();
+      if(!snap.exists){
+        await ensurePendingUserDoc({
+          uid: user.uid,
+          email: user.email,
+          nome: user.email ? user.email.split("@")[0] : "Usuário",
+          equipe: "equipe1",
+          solicitadoRole: "corretor"
+        });
+      }
+    }
   }catch(e){
     alert("Credenciais inválidas. Se for seu primeiro acesso, clique em CRIAR ACESSO.");
   }
@@ -406,20 +452,17 @@ window.criarAcesso = async function(){
   if(!equipe) return alert("Digite sua equipe (ex: equipe1).");
 
   try{
+    // tenta criar no Auth
     const cred = await auth.createUserWithEmailAndPassword(email, senha);
     const uid = cred.user.uid;
 
-    await db.collection("users").doc(uid).set({
-      nome,
+    await ensurePendingUserDoc({
+      uid,
       email,
+      nome,
       equipe,
-      role: "pendente",
-      solicitadoRole: roleReq,
-      aprovado: false,
-      solicitadoEm: nowMs(),
-      ativo: false,
-      mensagemPadrao: "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse."
-    }, { merge:true });
+      solicitadoRole: roleReq
+    });
 
     $("app").innerHTML = `
       ${renderBrand()}
@@ -433,10 +476,56 @@ window.criarAcesso = async function(){
       </div>
     `;
   }catch(e){
+    // ✅ EMAIL JÁ EXISTE → tenta logar e criar/normalizar pendência no Firestore
     if(String(e.code||"").includes("email-already-in-use")){
-      alert("Este email já existe. Se estiver pendente, aguarde aprovação.");
+      try{
+        await auth.signInWithEmailAndPassword(email, senha);
+        const user = auth.currentUser;
+
+        if(!user){
+          alert("Não foi possível entrar com esse email/senha.");
+          return;
+        }
+
+        const res = await ensurePendingUserDoc({
+          uid: user.uid,
+          email: user.email,
+          nome,
+          equipe,
+          solicitadoRole: roleReq
+        });
+
+        if(res.status === "approved"){
+          $("app").innerHTML = `
+            ${renderBrand()}
+            <div class="card">
+              <div class="ok">✅ Este acesso já está aprovado.</div>
+              <div class="divider"></div>
+              <div class="small muted">Entre normalmente clicando em ENTRAR.</div>
+              <div class="divider"></div>
+              <button class="btn btnGold" onclick="location.reload()">VOLTAR</button>
+            </div>
+          `;
+          return;
+        }
+
+        $("app").innerHTML = `
+          ${renderBrand()}
+          <div class="card">
+            <div class="ok">✅ Acesso encontrado e registrado como PENDENTE.</div>
+            <div class="divider"></div>
+            <div><b>Aguardando validação do gestor ou diretor.</b></div>
+            <div class="small muted">Assim que aprovarem, você poderá usar o PROEFI normalmente.</div>
+            <div class="divider"></div>
+            <button class="btn btnGold" onclick="auth.signOut()">SAIR</button>
+          </div>
+        `;
+      }catch(err2){
+        alert("Este email já existe, mas a senha não confere. Use a senha correta ou peça redefinição ao diretor.");
+      }
       return;
     }
+
     alert(e.message);
   }
 };
@@ -456,7 +545,7 @@ function renderPending(user, data){
   $("app").innerHTML = `
     ${renderHeader(user.email, "pendente")}
     <div class="card">
-      <div class="ok">✅ Seu acesso foi criado.</div>
+      <div class="ok">✅ Seu acesso foi registrado.</div>
       <div class="divider"></div>
       <div><b>Status:</b> aguardando validação do gerente/diretor.</div>
       <div class="small muted">Equipe: ${data?.equipe || "-"}</div>
@@ -562,10 +651,10 @@ function makeLeadDoc(base){
 
     totalTentativas: 0,
 
-    origem: null,        // geral | gerente | corretor
-    equipe: null,        // string
-    donoUpload: null,    // uid
-    listaRef: null,      // id da lista
+    origem: null,
+    equipe: null,
+    donoUpload: null,
+    listaRef: null,
 
     ultimoNaoAtendeuPor: null,
     ultimoNaoAtendeuEm: null
@@ -647,7 +736,6 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
 
 /** =========================
  *  Stats Diários (ranking)
- *  - stats_diarios docId: `${dateKey}_${uid}`
  *  ========================= */
 async function bumpDailyStat(uid, equipe, email, patch){
   const dk = dayKey(nowMs());
@@ -666,7 +754,6 @@ async function bumpDailyStat(uid, equipe, email, patch){
     next.atualizadoEm = nowMs();
     if(!next.criadoEm) next.criadoEm = nowMs();
 
-    // contadores
     for(const k of Object.keys(patch)){
       const add = Number(patch[k] || 0);
       next[k] = Number(next[k] || 0) + add;
@@ -677,7 +764,7 @@ async function bumpDailyStat(uid, equipe, email, patch){
 }
 
 /** =========================
- *  Lead picking (sem repetir imediatamente / cooldown)
+ *  Lead picking
  *  ========================= */
 async function queryCandidatesForCorretor({ source, corretorUid, equipeCorretor }){
   let q = db.collection("leads").where("status","==","fila");
@@ -686,11 +773,10 @@ async function queryCandidatesForCorretor({ source, corretorUid, equipeCorretor 
     q = q.where("origem","==","geral").where("corretorId","==",corretorUid);
   }else if(source === "gerente"){
     q = q.where("origem","==","gerente").where("equipe","==",equipeCorretor).where("corretorId","==",null);
-  }else{ // minha
+  }else{
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
-  // sem orderBy para não exigir índice extra aqui
   const snap = await q.limit(PICK_LIMIT).get();
   return snap.docs;
 }
@@ -706,7 +792,6 @@ function isBlockedByCooldown(doc){
 async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
   const candidates = await queryCandidatesForCorretor({ source, corretorUid, equipeCorretor });
 
-  // filtra: não repetir último e respeitar cooldown do "não atendeu"
   const filtered = candidates.filter(doc=>{
     if(lastLeadId && doc.id === lastLeadId) return false;
     if(isBlockedByCooldown(doc)) return false;
@@ -715,18 +800,15 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
 
   if(filtered.length === 0) return null;
 
-  // aleatório
   const chosenDoc = filtered[Math.floor(Math.random() * filtered.length)];
   const ref = chosenDoc.ref;
 
-  // "claim" via transaction para evitar 2 corretores pegarem o mesmo
   const claimed = await db.runTransaction(async (tx)=>{
     const snap = await tx.get(ref);
     if(!snap.exists) return null;
     const data = snap.data() || {};
     if(data.status !== "fila") return null;
 
-    // regras por origem
     if(source === "geral"){
       if(data.origem !== "geral" || data.corretorId !== corretorUid) return null;
     }else if(source === "gerente"){
@@ -880,7 +962,6 @@ function renderCorretorShell(user, data){
 
   $("app").innerHTML = header + body + renderBottomNav(corretorTabs());
 
-  // hydrate
   if(currentTab === "atendimento" && leadAtualRef && leadAtualData){
     renderLeadInArea();
   }
@@ -897,7 +978,6 @@ function startSessionClock(){
   const el = $("sessClock");
   if(!el) return;
   if(!loginTimestamp) loginTimestamp = nowMs();
-  // atualiza 1x por segundo
   const localStart = loginTimestamp;
   const tick = ()=>{
     const node = $("sessClock");
@@ -960,10 +1040,8 @@ window.pegarProximoLead = async function(){
   draftAgHora = "";
   draftObs = "";
 
-  // stats: conta ligação/tentativa no momento da distribuição
   await bumpDailyStat(currentUser.uid, equipe, currentUser.email, { ligacoes: 1 });
 
-  // vai para aba atendimento automaticamente
   currentTab = "atendimento";
   renderCorretorShell(currentUser, currentUserData);
 };
@@ -972,7 +1050,6 @@ async function renderLeadInArea(){
   const area = $("leadArea");
   if(!area || !leadAtualData) return;
 
-  // sempre busca mensagem atualizada
   const snap = await db.collection("users").doc(currentUser.uid).get();
   const userAtual = snap.exists ? (snap.data() || {}) : {};
   const msgBase  = userAtual.mensagemPadrao || "";
@@ -1032,28 +1109,20 @@ window.uiNaoAtendeu = async function(){
 
   await leadAtualRef.update({
     status: "fila",
-    // se for geral, mantém corretorId (pois foi “pré-distribuído” no upload)
-    // se for gerente/minha, devolve corretorId para null
     corretorId: (leadAtualData.origem === "geral") ? currentUser.uid : null,
-
     emAtendimentoEm: null,
     timestampFinalizacao: null,
-
     atendeu: false,
     resultado: null,
     observacao: null,
     dataAgendada: null,
-
     ultimoNaoAtendeuPor: currentUser.uid,
     ultimoNaoAtendeuEm: nowMs(),
-
     atualizadoEm: nowMs()
   });
 
-  // stats
   await bumpDailyStat(currentUser.uid, equipe, currentUser.email, { naoAtendeu: 1 });
 
-  // limpa estado e evita repetir
   lastLeadId = leadId;
   leadAtualRef = null;
   leadAtualData = null;
@@ -1063,8 +1132,6 @@ window.uiNaoAtendeu = async function(){
   draftAgHora = "";
   draftObs = "";
 
-  // automaticamente pega outro (mesma fonte selecionada no painel)
-  // aqui vamos ler a fonte atual (se não existir select na aba, usa geral)
   const source = ($("leadSource") && $("leadSource").value) ? $("leadSource").value : "geral";
   const picked = await pickNextLeadForCorretor({ source, corretorUid: currentUser.uid, equipeCorretor: equipe });
 
@@ -1076,9 +1143,7 @@ window.uiNaoAtendeu = async function(){
   leadAtualRef = picked.ref;
   leadAtualData = picked.data;
 
-  // conta nova tentativa
   await bumpDailyStat(currentUser.uid, equipe, currentUser.email, { ligacoes: 1 });
-
   await renderLeadInArea();
 };
 
@@ -1155,7 +1220,6 @@ function renderAtendeuBox(){
 }
 
 window.toggleOutcome = function(kind){
-  // salva rascunhos do que estiver aberto antes de alternar
   persistDraftFromOpenOutcome();
   openOutcome = (openOutcome === kind) ? null : kind;
   renderAtendeuBox();
@@ -1174,7 +1238,6 @@ function persistDraftFromOpenOutcome(){
 }
 
 window.cancelarAtendeu = function(){
-  // não salva nada, só fecha o box
   detailsOpen = false;
   openOutcome = null;
   draftAgData = "";
@@ -1226,7 +1289,6 @@ window.confirmarAtendeu = async function(){
     atualizadoEm: nowMs()
   });
 
-  // stats
   const patch = { atendidos: 1 };
   if(resultado === "AGENDAMENTO") patch.agendamentos = 1;
   else if(resultado === "PROMESSA DOCUMENTAÇÃO") patch.promessas = 1;
@@ -1234,7 +1296,6 @@ window.confirmarAtendeu = async function(){
 
   await bumpDailyStat(currentUser.uid, equipe, currentUser.email, patch);
 
-  // limpa estado
   lastLeadId = leadId;
   leadAtualRef = null;
   leadAtualData = null;
@@ -1244,7 +1305,6 @@ window.confirmarAtendeu = async function(){
   draftAgHora = "";
   draftObs = "";
 
-  // automaticamente tenta pegar outro
   const source = ($("leadSource") && $("leadSource").value) ? $("leadSource").value : "geral";
   const picked = await pickNextLeadForCorretor({ source, corretorUid: currentUser.uid, equipeCorretor: equipe });
 
@@ -1256,9 +1316,7 @@ window.confirmarAtendeu = async function(){
   leadAtualRef = picked.ref;
   leadAtualData = picked.data;
 
-  // conta nova tentativa
   await bumpDailyStat(currentUser.uid, equipe, currentUser.email, { ligacoes: 1 });
-
   await renderLeadInArea();
 };
 
@@ -1283,7 +1341,6 @@ window.gerarRelatorioExcel = async function(){
   snap.forEach(ds=>{
     const d = ds.data() || {};
 
-    // tentativas do dia: usamos timestampDistribuicao
     if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today){
       totalLigacoes += 1;
     }
@@ -1291,7 +1348,6 @@ window.gerarRelatorioExcel = async function(){
       totalNaoAtendeu += 1;
     }
 
-    // atendidos do dia (finalizados)
     if(d.atendeu === true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao) === today){
       totalAtendidos += 1;
       if(d.resultado === "AGENDAMENTO") totalAgend += 1;
@@ -1381,9 +1437,6 @@ PROEFI - ALVENA`
   window.location.href = `mailto:${encodeURIComponent(to)}?subject=${subject}&body=${body}`;
 };
 
-/** =========================
- *  CORRETOR: Hydrates
- *  ========================= */
 async function hydrateMyDayStats(){
   const dk = dayKey(nowMs());
   const docId = `${dk}_${currentUser.uid}`;
@@ -1712,7 +1765,6 @@ async function hydrateDiretorTab(){
       `;
     }
 
-    // agrupa por equipe
     const byEquipe = {};
     for(const x of geral.list){
       const eq = x.equipe || "SEM_EQUIPE";
@@ -1727,7 +1779,6 @@ async function hydrateDiretorTab(){
       byEquipe[eq].semInteresse += (x.semInteresse||0);
     }
 
-    // mapeia gerente por equipe
     const gerSnap = await db.collection("users")
       .where("role","==","gerente")
       .where("aprovado","==",true)
@@ -1816,7 +1867,6 @@ auth.onAuthStateChanged(async (user)=>{
     currentUser = null;
     currentUserData = null;
 
-    // limpa estado de lead quando desloga
     leadAtualRef = null;
     leadAtualData = null;
     detailsOpen = false;
@@ -1837,7 +1887,15 @@ auth.onAuthStateChanged(async (user)=>{
 
   const userSnap = await db.collection("users").doc(user.uid).get();
   if(!userSnap.exists){
-    renderUnauthorized();
+    // ✅ agora cria pendente automaticamente em vez de bloquear
+    await ensurePendingUserDoc({
+      uid: user.uid,
+      email: user.email,
+      nome: user.email ? user.email.split("@")[0] : "Usuário",
+      equipe: "equipe1",
+      solicitadoRole: "corretor"
+    });
+    renderPending(user, await getUserDoc(user.uid));
     return;
   }
 
@@ -1849,10 +1907,7 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
 
-  // primeira vez que entra logado
   if(!loginTimestamp) loginTimestamp = nowMs();
-
-  // render por role
   currentTab = currentTab || "painel";
 
   if(currentUserData.role === "diretor"){
@@ -1864,7 +1919,6 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
 
-  // corretor
   renderCorretorShell(user, currentUserData);
 });
 </script>
