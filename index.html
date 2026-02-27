@@ -11,42 +11,15 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
 <style>
-body{
-  font-family: Arial;
-  margin:0;
-  padding:20px;
-  background:#f4f6f9;
-}
-
-.container{
-  max-width:500px;
-  margin:auto;
-}
-
-.card{
-  background:white;
-  padding:20px;
-  border-radius:12px;
-  box-shadow:0 4px 12px rgba(0,0,0,0.08);
-  margin-bottom:15px;
-}
-
-button{
-  width:100%;
-  padding:14px;
-  margin-top:10px;
-  border:none;
-  border-radius:8px;
-  font-size:16px;
-  font-weight:bold;
-  cursor:pointer;
-}
-
-.btn-verde{ background:#b9f6ca; }
-.btn-vermelho{ background:#ffcccb; }
-.btn-azul{ background:#bbdefb; }
-.btn-roxo{ background:#e1bee7; }
-
+body{font-family:Arial;margin:0;padding:20px;background:#f4f6f9;}
+.container{max-width:500px;margin:auto;}
+.card{background:white;padding:20px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.08);margin-bottom:15px;}
+button{width:100%;padding:14px;margin-top:10px;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;}
+.btn-verde{background:#b9f6ca;}
+.btn-vermelho{background:#ffcccb;}
+.btn-azul{background:#bbdefb;}
+.btn-roxo{background:#e1bee7;}
+input,textarea{width:100%;padding:10px;margin-top:8px;border-radius:6px;border:1px solid #ccc;}
 h2{text-align:center;}
 </style>
 </head>
@@ -62,8 +35,7 @@ const firebaseConfig = {
   projectId: "proefi-alvena",
   storageBucket: "proefi-alvena.firebasestorage.app",
   messagingSenderId: "1084612497727",
-  appId: "1:1084612497727:web:d9b1de2962cce8123b038a",
-  measurementId: "G-SZPXEMV5B4"
+  appId: "1:1084612497727:web:d9b1de2962cce8123b038a"
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -74,153 +46,215 @@ let loginTimestamp = Date.now();
 let leadAtual = null;
 
 auth.onAuthStateChanged(async(user)=>{
-  if(!user){
-    telaLogin();
-  }else{
+  if(!user){ telaLogin(); }
+  else{
     const doc = await db.collection("users").doc(user.uid).get();
     if(!doc.exists){ alert("Usuário não autorizado"); auth.signOut(); return; }
-
-    const role = doc.data().role;
-    if(role==="gerente"){
-      telaGerente(user);
-    }else{
-      telaCorretor(user);
-    }
+    if(doc.data().role==="gerente"){ telaGerente(user); }
+    else{ telaCorretor(user); }
   }
 });
 
 function telaLogin(){
-  document.getElementById("app").innerHTML=`
-  <div class="card">
-    <h2>Login</h2>
-    <input id="email" placeholder="Email" style="width:100%;padding:10px;margin-top:10px;">
-    <input id="senha" type="password" placeholder="Senha" style="width:100%;padding:10px;margin-top:10px;">
-    <button onclick="login()">Entrar</button>
-  </div>`;
+document.getElementById("app").innerHTML=`
+<div class="card">
+<h2>Login</h2>
+<input id="email" placeholder="Email">
+<input id="senha" type="password" placeholder="Senha">
+<button onclick="login()">Entrar</button>
+</div>`;
 }
 
 function login(){
-  const email=document.getElementById("email").value;
-  const senha=document.getElementById("senha").value;
-  auth.signInWithEmailAndPassword(email,senha)
-  .catch(e=>alert(e.message));
+auth.signInWithEmailAndPassword(
+document.getElementById("email").value,
+document.getElementById("senha").value
+).catch(e=>alert(e.message));
 }
 
 function telaGerente(user){
-  document.getElementById("app").innerHTML=`
-  <div class="card">
-    <h2>GERENTE</h2>
-    <p>${user.email}</p>
-    <button onclick="auth.signOut()">Sair</button>
-  </div>`;
+document.getElementById("app").innerHTML=`
+<div class="card">
+<h2>GERENTE</h2>
+<p>${user.email}</p>
+<button onclick="auth.signOut()">Sair</button>
+</div>`;
 }
 
 function telaCorretor(user){
-  loginTimestamp = Date.now();
+loginTimestamp=Date.now();
+document.getElementById("app").innerHTML=`
+<div class="card">
+<h2>CORRETOR</h2>
+<p>${user.email}</p>
+</div>
 
-  document.getElementById("app").innerHTML=`
-  <div class="card">
-    <h2>CORRETOR</h2>
-    <p>${user.email}</p>
-  </div>
+<div class="card" id="leadCard">
+<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
+</div>
 
-  <div class="card" id="leadCard">
-    <button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
-  </div>
-
-  <div class="card">
-    <button class="btn-verde" onclick="finalizarLead('ATENDEU')">ATENDEU</button>
-    <button class="btn-vermelho" onclick="finalizarLead('NAO ATENDEU')">NÃO ATENDEU</button>
-    <button class="btn-roxo" onclick="finalizarLead('AGENDAMENTO')">📅 AGENDAMENTO</button>
-    <button class="btn-roxo" onclick="finalizarLead('PROMESSA DOC')">PROMESSA DE DOCUMENTAÇÃO</button>
-    <button class="btn-azul" onclick="finalizarExpediente()">📊 FINALIZAR EXPEDIENTE</button>
-  </div>`;
+<div class="card">
+<button class="btn-verde" onclick="marcarAtendeu()">ATENDEU</button>
+<button class="btn-vermelho" onclick="naoAtendeu()">NÃO ATENDEU</button>
+<button class="btn-azul" onclick="finalizarExpediente()">📊 FINALIZAR EXPEDIENTE</button>
+</div>`;
 }
 
 async function pegarLead(){
-  const snapshot = await db.collection("leads")
-  .where("status","==","fila")
-  .limit(1).get();
+const snapshot=await db.collection("leads")
+.where("status","==","fila")
+.limit(1).get();
 
-  if(snapshot.empty){
-    alert("Sem leads disponíveis");
-    return;
-  }
+if(snapshot.empty){alert("Sem leads disponíveis");return;}
 
-  const doc = snapshot.docs[0];
-  leadAtual = doc;
+leadAtual=snapshot.docs[0];
 
-  await doc.ref.update({
-    status:"em atendimento",
-    corretorId:auth.currentUser.uid,
-    timestampDistribuicao:Date.now()
-  });
+await leadAtual.ref.update({
+status:"em atendimento",
+corretorId:auth.currentUser.uid,
+timestampDistribuicao:Date.now()
+});
 
-  document.getElementById("leadCard").innerHTML=`
-  <b>${doc.data().nome}</b><br>
-  ${doc.data().telefone}
-  `;
+document.getElementById("leadCard").innerHTML=`
+<b>${leadAtual.data().nome}</b><br>
+${leadAtual.data().telefone}`;
 }
 
-async function finalizarLead(resultado){
-  if(!leadAtual) return alert("Nenhum lead ativo");
+async function naoAtendeu(){
+if(!leadAtual) return alert("Nenhum lead ativo");
 
-  await leadAtual.ref.update({
-    status:"finalizado",
-    resultado:resultado,
-    timestampFinalizacao:Date.now()
-  });
+await leadAtual.ref.update({
+status:"finalizado",
+atendeu:false,
+timestampFinalizacao:Date.now()
+});
 
-  leadAtual=null;
-  document.getElementById("leadCard").innerHTML=
-  `<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
+leadAtual=null;
+document.getElementById("leadCard").innerHTML=
+`<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
+}
+
+function marcarAtendeu(){
+if(!leadAtual) return alert("Nenhum lead ativo");
+
+document.getElementById("leadCard").innerHTML+=`
+<div id="detalhes">
+<h3>Resultado Obrigatório</h3>
+
+<button class="btn-roxo" onclick="agendamento()">📅 AGENDAMENTO</button>
+<button class="btn-roxo" onclick="promessa()">PROMESSA DE DOCUMENTAÇÃO</button>
+<button class="btn-roxo" onclick="semInteresse()">NÃO GEROU INTERESSE</button>
+
+<div id="extra"></div>
+</div>`;
+}
+
+function agendamento(){
+document.getElementById("extra").innerHTML=`
+<input type="date" id="dataAg">
+<input type="time" id="horaAg">
+<button onclick="confirmarAgendamento()">CONFIRMAR</button>`;
+}
+
+async function confirmarAgendamento(){
+const data=document.getElementById("dataAg").value;
+const hora=document.getElementById("horaAg").value;
+
+if(!data || !hora) return alert("Preencha data e hora");
+
+await leadAtual.ref.update({
+status:"finalizado",
+atendeu:true,
+resultado:"AGENDAMENTO",
+dataAgendada:data+" "+hora,
+timestampFinalizacao:Date.now()
+});
+
+leadAtual=null;
+document.getElementById("leadCard").innerHTML=
+`<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
+}
+
+function promessa(){
+document.getElementById("extra").innerHTML=`
+<textarea id="obs" placeholder="Observação (opcional)"></textarea>
+<button onclick="confirmarPromessa()">CONFIRMAR</button>`;
+}
+
+async function confirmarPromessa(){
+await leadAtual.ref.update({
+status:"finalizado",
+atendeu:true,
+resultado:"PROMESSA DOCUMENTAÇÃO",
+observacao:document.getElementById("obs").value,
+timestampFinalizacao:Date.now()
+});
+leadAtual=null;
+document.getElementById("leadCard").innerHTML=
+`<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
+}
+
+function semInteresse(){
+document.getElementById("extra").innerHTML=`
+<textarea id="feedback" placeholder="Feedback obrigatório"></textarea>
+<button onclick="confirmarSemInteresse()">CONFIRMAR</button>`;
+}
+
+async function confirmarSemInteresse(){
+const fb=document.getElementById("feedback").value;
+if(!fb) return alert("Preencha o feedback");
+
+await leadAtual.ref.update({
+status:"finalizado",
+atendeu:true,
+resultado:"NÃO GEROU INTERESSE",
+observacao:fb,
+timestampFinalizacao:Date.now()
+});
+leadAtual=null;
+document.getElementById("leadCard").innerHTML=
+`<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
 }
 
 async function finalizarExpediente(){
 
-  const user=auth.currentUser;
+const snapshot=await db.collection("leads")
+.where("corretorId","==",auth.currentUser.uid)
+.where("atendeu","==",true)
+.get();
 
-  const snapshot = await db.collection("leads")
-  .where("corretorId","==",user.uid)
-  .where("status","==","finalizado")
-  .get();
+if(snapshot.empty){alert("Nenhum atendimento");return;}
 
-  if(snapshot.empty){
-    alert("Nenhum atendimento encontrado.");
-    return;
-  }
+let dados=[];
+snapshot.forEach(doc=>{
+const d=doc.data();
+const tempo=Math.floor((d.timestampFinalizacao-d.timestampDistribuicao)/60000);
+dados.push({
+Cliente:d.nome,
+Telefone:d.telefone,
+Resultado:d.resultado,
+Data:d.dataAgendada || "",
+Feedback:d.observacao || "",
+"Tempo Atendimento (min)":tempo
+});
+});
 
-  let dados=[];
-  snapshot.forEach(doc=>{
-    const d=doc.data();
-    const tempo=Math.floor((d.timestampFinalizacao-d.timestampDistribuicao)/60000);
+const tempoLogado=Math.floor((Date.now()-loginTimestamp)/60000);
 
-    dados.push({
-      Cliente:d.nome,
-      Telefone:d.telefone,
-      Resultado:d.resultado,
-      "Tempo Atendimento (min)":tempo
-    });
-  });
+const resumo=[
+["Operador",auth.currentUser.email],
+["Tempo Logado (min)",tempoLogado],
+["Total Atendidos",dados.length]
+];
 
-  const tempoLogado=Math.floor((Date.now()-loginTimestamp)/60000);
+const ws1=XLSX.utils.json_to_sheet(dados);
+const ws2=XLSX.utils.aoa_to_sheet(resumo);
+const wb=XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb,ws2,"Resumo");
+XLSX.utils.book_append_sheet(wb,ws1,"Atendimentos");
 
-  const resumo=[
-    ["Operador",user.email],
-    ["Tempo Logado (min)",tempoLogado],
-    ["Total Ligações",dados.length]
-  ];
-
-  const ws1=XLSX.utils.json_to_sheet(dados);
-  const ws2=XLSX.utils.aoa_to_sheet(resumo);
-
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws2,"Resumo");
-  XLSX.utils.book_append_sheet(wb,ws1,"Ligações");
-
-  XLSX.writeFile(wb,"Relatorio.xlsx");
-
-  alert("Relatório gerado com sucesso!");
+XLSX.writeFile(wb,"Relatorio.xlsx");
+alert("Relatório gerado!");
 }
 
 </script>
