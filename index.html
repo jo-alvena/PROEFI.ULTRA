@@ -3,48 +3,40 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PROEFI</title>
+<title>PROEFI - Alvena</title>
 
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
 
 <style>
 body{
+  font-family: Arial;
   margin:0;
-  font-family:'Century Gothic',Arial;
-  background:#21346C;
-  color:#FFFFFF;
   padding:20px;
+  background:#f4f6f9;
 }
 
-h2{
-  color:#BC8A0B;
-  margin-bottom:5px;
+.container{
+  max-width:500px;
+  margin:auto;
 }
 
 .card{
-  background:#FFFFFF;
-  color:#21346C;
+  background:white;
   padding:20px;
   border-radius:12px;
-  margin-top:20px;
-}
-
-input, textarea{
-  width:100%;
-  padding:12px;
-  margin-top:8px;
-  margin-bottom:10px;
-  border-radius:8px;
-  border:1px solid #ccc;
-  font-size:16px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.08);
+  margin-bottom:15px;
 }
 
 button{
   width:100%;
   padding:14px;
-  margin-top:8px;
+  margin-top:10px;
   border:none;
   border-radius:8px;
   font-size:16px;
@@ -52,216 +44,183 @@ button{
   cursor:pointer;
 }
 
-/* CORES */
-.btn-primario{background:#BC8A0B;color:#FFFFFF;}
-.btn-verde{background:#A5D6A7;color:#21346C;}
-.btn-vermelho{background:#EF9A9A;color:#21346C;}
-.btn-azul{background:#21346C;color:#FFFFFF;}
-.btn-outline{
-  background:#FFFFFF;
-  color:#21346C;
-  border:2px solid #21346C;
-}
+.btn-verde{ background:#b9f6ca; }
+.btn-vermelho{ background:#ffcccb; }
+.btn-azul{ background:#bbdefb; }
+.btn-roxo{ background:#e1bee7; }
 
-.grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
-}
-
-a{text-decoration:none;}
+h2{text-align:center;}
 </style>
 </head>
 <body>
 
-<div id="app">Carregando...</div>
+<div class="container" id="app"></div>
 
 <script>
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
-  authDomain: "proefi-alvena.firebaseapp.com",
-  projectId: "proefi-alvena",
-  storageBucket: "proefi-alvena.firebasestorage.app",
-  messagingSenderId: "1084612497727",
-  appId: "1:1084612497727:web:d9b1de2962cce8123b038a",
-  measurementId: "G-SZPXEMV5B4"
+  apiKey: "COLE_SUA_API_KEY",
+  authDomain: "COLE_SEU_AUTHDOMAIN",
+  projectId: "COLE_SEU_PROJECTID",
+  storageBucket: "COLE_STORAGE",
+  messagingSenderId: "COLE_MESSAGING",
+  appId: "COLE_APPID"
 };
+
 firebase.initializeApp(firebaseConfig);
-const auth=firebase.auth();
-const db=firebase.firestore();
-const app=document.getElementById("app");
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let loginTimestamp = Date.now();
+let leadAtual = null;
 
 auth.onAuthStateChanged(async(user)=>{
-  if(!user){mostrarLogin();return;}
+  if(!user){
+    telaLogin();
+  }else{
+    const doc = await db.collection("users").doc(user.uid).get();
+    const role = doc.data().role;
 
-  const doc=await db.collection("users").doc(user.uid).get();
-  if(!doc.exists){app.innerHTML="Usuário não autorizado";return;}
-
-  const role=doc.data().role;
-  if(role==="gerente"){mostrarGerente(user.email);}
-  else{mostrarCorretor(user.email);}
+    if(role==="gerente"){
+      telaGerente(user);
+    }else{
+      telaCorretor(user);
+    }
+  }
 });
 
-function mostrarLogin(){
-  app.innerHTML=`
-    <h2>PROEFI</h2>
-    <input id="email" placeholder="Email">
-    <input id="senha" type="password" placeholder="Senha">
-    <button class="btn-primario" onclick="login()">ENTRAR</button>
-  `;
+function telaLogin(){
+  document.getElementById("app").innerHTML=`
+  <div class="card">
+    <h2>Login</h2>
+    <input id="email" placeholder="Email" style="width:100%;padding:10px;margin-top:10px;">
+    <input id="senha" type="password" placeholder="Senha" style="width:100%;padding:10px;margin-top:10px;">
+    <button onclick="login()">Entrar</button>
+  </div>`;
 }
 
 function login(){
-  auth.signInWithEmailAndPassword(
-    document.getElementById("email").value,
-    document.getElementById("senha").value
-  ).catch(e=>alert(e.message));
+  const email=document.getElementById("email").value;
+  const senha=document.getElementById("senha").value;
+  auth.signInWithEmailAndPassword(email,senha)
+  .catch(e=>alert(e.message));
 }
 
-function logout(){auth.signOut();}
-
-function mostrarGerente(email){
-  app.innerHTML=`
-    <h2>PROEFI - GERENTE</h2>
-    <p>${email}</p>
-    <button class="btn-primario" onclick="logout()">Sair</button>
-  `;
+function telaGerente(user){
+  document.getElementById("app").innerHTML=`
+  <div class="card">
+    <h2>GERENTE</h2>
+    <p>${user.email}</p>
+    <button onclick="auth.signOut()">Sair</button>
+  </div>`;
 }
 
-function mostrarCorretor(email){
-  app.innerHTML=`
-    <h2>PROEFI - CORRETOR</h2>
-    <p>${email}</p>
-    <button class="btn-primario" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
-    <div id="leadAtual"></div>
-    <button class="btn-outline" onclick="logout()">Sair</button>
-  `;
+function telaCorretor(user){
+  document.getElementById("app").innerHTML=`
+  <div class="card">
+    <h2>CORRETOR</h2>
+    <p>${user.email}</p>
+  </div>
+
+  <div class="card" id="leadCard">
+    <button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
+  </div>
+
+  <div class="card">
+    <button class="btn-verde" onclick="finalizarLead('ATENDEU')">ATENDEU</button>
+    <button class="btn-vermelho" onclick="finalizarLead('NAO ATENDEU')">NÃO ATENDEU</button>
+    <button class="btn-roxo" onclick="finalizarLead('AGENDAMENTO')">📅 AGENDAMENTO</button>
+    <button class="btn-roxo" onclick="finalizarLead('PROMESSA DOC')">PROMESSA DE DOCUMENTAÇÃO</button>
+    <button class="btn-azul" onclick="finalizarExpediente()">📊 FINALIZAR EXPEDIENTE</button>
+  </div>`;
 }
 
-window.pegarLead=async function(){
-  const snapshot=await db.collection("leads")
-  .where("status","==","fila").limit(1).get();
+async function pegarLead(){
+  const snapshot = await db.collection("leads")
+  .where("status","==","fila")
+  .limit(1).get();
 
-  if(snapshot.empty){alert("Sem leads disponíveis");return;}
+  if(snapshot.empty){
+    alert("Sem leads disponíveis");
+    return;
+  }
 
-  const doc=snapshot.docs[0];
+  const doc = snapshot.docs[0];
+  leadAtual = doc;
 
-  await db.collection("leads").doc(doc.id).update({
-    status:"em_atendimento",
+  await doc.ref.update({
+    status:"em atendimento",
     corretorId:auth.currentUser.uid,
     timestampDistribuicao:Date.now()
   });
 
-  mostrarLead(doc.id,doc.data());
-}
-
-function mostrarLead(id,data){
-
-  const telefone=data.telefone.replace(/\D/g,'');
-  const mensagem=encodeURIComponent(`Olá ${data.nome}, aqui é da equipe Alvena.`);
-
-  document.getElementById("leadAtual").innerHTML=`
-  <div class="card">
-    <h3>${data.nome}</h3>
-    <p><strong>Telefone:</strong> ${data.telefone}</p>
-    <p><strong>Email:</strong> ${data.email}</p>
-
-    <div class="grid">
-      <a href="tel:${telefone}">
-        <button class="btn-azul">📞 LIGAR</button>
-      </a>
-
-      <a href="sms:${telefone}">
-        <button class="btn-azul">📩 SMS</button>
-      </a>
-
-      <a href="https://wa.me/55${telefone}?text=${mensagem}" target="_blank">
-        <button class="btn-azul">💬 WHATSAPP</button>
-      </a>
-    </div>
-
-    <textarea id="obs" placeholder="Observação"></textarea>
-
-    <input type="datetime-local" id="dataHora" style="display:none;">
-
-    <button class="btn-verde" onclick="finalizarLead('${id}','atendeu')">
-      ATENDEU
-    </button>
-
-    <button class="btn-vermelho" onclick="finalizarLead('${id}','nao_atendeu')">
-      NÃO ATENDEU
-    </button>
-
-    <button class="btn-primario" onclick="abrirAgendamento('${id}')">
-      📅 AGENDAMENTO
-    </button>
-
-    <button class="btn-primario" onclick="finalizarLead('${id}','promessa_documentacao')">
-      PROMESSA DE DOCUMENTAÇÃO
-    </button>
-
-    <p id="contador"></p>
-  </div>
+  document.getElementById("leadCard").innerHTML=`
+  <b>${doc.data().nome}</b><br>
+  ${doc.data().telefone}
   `;
-
-  iniciarTimer(id);
 }
 
-function abrirAgendamento(id){
-  const campo=document.getElementById("dataHora");
-  campo.style.display="block";
-  campo.focus();
-  campo.onchange=function(){
-    finalizarLead(id,'agendamento');
-  };
+async function finalizarLead(resultado){
+  if(!leadAtual) return alert("Nenhum lead ativo");
+
+  await leadAtual.ref.update({
+    status:"finalizado",
+    resultado:resultado,
+    timestampFinalizacao:Date.now()
+  });
+
+  leadAtual=null;
+  document.getElementById("leadCard").innerHTML=
+  `<button class="btn-azul" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>`;
 }
 
-window.finalizarLead=async function(id,resultado){
+async function finalizarExpediente(){
 
-  const obs=document.getElementById("obs").value;
-  const dataHora=document.getElementById("dataHora").value;
+  const user=auth.currentUser;
 
-  if(resultado==="agendamento" && !dataHora){
-    alert("Selecione data e hora.");
+  const snapshot = await db.collection("leads")
+  .where("corretorId","==",user.uid)
+  .where("status","==","finalizado")
+  .get();
+
+  if(snapshot.empty){
+    alert("Nenhum atendimento encontrado.");
     return;
   }
 
-  await db.collection("leads").doc(id).update({
-    status:"finalizado",
-    resultado:resultado,
-    observacao:obs,
-    dataAgendada:dataHora||null
+  let dados=[];
+  snapshot.forEach(doc=>{
+    const d=doc.data();
+    const tempo=Math.floor((d.timestampFinalizacao-d.timestampDistribuicao)/60000);
+
+    dados.push({
+      Cliente:d.nome,
+      Telefone:d.telefone,
+      Resultado:d.resultado,
+      "Tempo Atendimento (min)":tempo
+    });
   });
 
-  document.getElementById("leadAtual").innerHTML="";
-}
+  const tempoLogado=Math.floor((Date.now()-loginTimestamp)/60000);
 
-function iniciarTimer(id){
-  const tempoMaximo=20*60*1000;
-  const inicio=Date.now();
+  const resumo=[
+    ["Operador",user.email],
+    ["Tempo Logado (min)",tempoLogado],
+    ["Total Ligações",dados.length]
+  ];
 
-  const intervalo=setInterval(async()=>{
-    const restante=tempoMaximo-(Date.now()-inicio);
-    if(restante<=0){
-      clearInterval(intervalo);
-      await db.collection("leads").doc(id).update({
-        status:"fila",
-        corretorId:"",
-        timestampDistribuicao:0
-      });
-      document.getElementById("leadAtual").innerHTML="";
-      alert("Tempo expirado. Lead voltou para fila.");
-    }else{
-      const m=Math.floor(restante/60000);
-      const s=Math.floor((restante%60000)/1000);
-      document.getElementById("contador").innerText=
-      `Tempo restante: ${m}:${s.toString().padStart(2,'0')}`;
-    }
-  },1000);
+  const ws1=XLSX.utils.json_to_sheet(dados);
+  const ws2=XLSX.utils.aoa_to_sheet(resumo);
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws2,"Resumo");
+  XLSX.utils.book_append_sheet(wb,ws1,"Ligações");
+
+  XLSX.writeFile(wb,"Relatorio.xlsx");
+
+  alert("Relatório gerado com sucesso!");
 }
 
 </script>
 </body>
 </html>
-
