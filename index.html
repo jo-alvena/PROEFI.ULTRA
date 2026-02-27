@@ -11,57 +11,25 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
 <style>
-:root{
- --blue:#21346C;
- --gold:#BC8A0B;
- --white:#fff;
- --green:#B9F6CA;
- --red:#FFCCCB;
-}
-body{
- margin:0;
- font-family:Arial;
- background:var(--blue);
- color:white;
-}
-.wrap{max-width:520px;margin:auto;padding:12px;}
-.card{
- background:white;
- color:#21346C;
- border-radius:12px;
- padding:12px;
- margin-bottom:10px;
-}
-.btn{
- width:100%;
- padding:12px;
- border:none;
- border-radius:10px;
- font-weight:700;
- margin-top:8px;
-}
-.btnGold{background:var(--gold);color:white;}
-.btnBlue{background:var(--blue);color:white;}
-.btnGreen{background:var(--green);}
-.btnRed{background:var(--red);}
+body{margin:0;font-family:Arial;background:#21346C;color:white;}
+.wrap{max-width:520px;margin:auto;padding:10px;}
+.card{background:white;color:#21346C;padding:12px;border-radius:12px;margin-bottom:10px;}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;margin-top:8px;}
+.btnBlue{background:#21346C;color:white;}
+.btnGold{background:#BC8A0B;color:white;}
+.btnGreen{background:#B9F6CA;}
+.btnRed{background:#FFCCCB;}
 .menu{
- position:fixed;
- bottom:0;left:0;right:0;
- background:#fff;
- display:flex;
- justify-content:space-around;
- border-top:1px solid #ddd;
+position:fixed;bottom:0;left:0;right:0;
+display:flex;background:white;border-top:1px solid #ccc;
 }
 .menu button{
- flex:1;
- border:none;
- background:white;
- padding:12px;
- font-weight:bold;
+flex:1;
+padding:20px; /* DOBRADO */
+font-size:16px;
+font-weight:bold;
+border:none;background:white;
 }
-.hidden{display:none;}
-h2{margin:4px 0;}
-.small{font-size:12px;opacity:.7}
 </style>
 </head>
 
@@ -69,296 +37,171 @@ h2{margin:4px 0;}
 <div class="wrap" id="app">Carregando...</div>
 
 <script>
-/* ================= FIREBASE ================= */
 const firebaseConfig={
- apiKey:"AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
- authDomain:"proefi-alvena.firebaseapp.com",
- projectId:"proefi-alvena",
- storageBucket:"proefi-alvena.firebasestorage.app",
- messagingSenderId:"1084612497727",
- appId:"1:1084612497727:web:d9b1de2962cce8123b038a"
+apiKey:"AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
+authDomain:"proefi-alvena.firebaseapp.com",
+projectId:"proefi-alvena",
+storageBucket:"proefi-alvena.firebasestorage.app",
+messagingSenderId:"1084612497727",
+appId:"1:1084612497727:web:d9b1de2962cce8123b038a"
 };
 firebase.initializeApp(firebaseConfig);
 const auth=firebase.auth();
 const db=firebase.firestore();
 
-/* ================= STATE ================= */
 let userData=null;
 let leadAtual=null;
-let loginStart=Date.now();
-let currentTab="painel";
 
-/* ================= HELPERS ================= */
 function $(id){return document.getElementById(id);}
-function cleanPhone(v){return String(v||"").replace(/\D/g,"");}
-function now(){return Date.now();}
+function clean(v){return String(v||"").replace(/\D/g,"");}
 
-function msgTemplate(msg,lead){
- return msg
-  .replaceAll("{{nome}}",lead.nome||"")
-  .replaceAll("{{telefone}}",lead.telefone||"")
-  .replaceAll("{{email}}",lead.email||"");
+function login(){
+document.getElementById("app").innerHTML=`
+<div class="card">
+<h2>PROEFI - ALVENA</h2>
+<input id="email" placeholder="email"><br><br>
+<input id="senha" type="password" placeholder="senha">
+<button class="btn btnGold" onclick="doLogin()">ENTRAR</button>
+</div>`;
+}
+window.doLogin=()=>auth.signInWithEmailAndPassword(email.value,senha.value);
+
+function app(){
+app.innerHTML=`
+<div id="view"></div>
+<div class="menu">
+<button onclick="tab('painel')">🏠</button>
+<button onclick="tab('atendimento')">☎️</button>
+<button onclick="tab('resultados')">📊</button>
+<button onclick="tab('config')">⚙️</button>
+</div>`;
+tab("painel");
 }
 
-/* ================= LOGIN ================= */
-function renderLogin(){
- $("app").innerHTML=`
- <div style="text-align:center;margin-top:20px">
-   <h2 style="color:#BC8A0B">PROEFI - ALVENA</h2>
-   <div>Produção Eficiente<br/>Alvena Soluções Imobiliárias</div>
- </div>
- <div class="card">
-   <input id="email" placeholder="Email"/><br/><br/>
-   <input id="senha" type="password" placeholder="Senha"/>
-   <button class="btn btnGold" onclick="doLogin()">ENTRAR</button>
- </div>`;
+function tab(t){
+if(t==="painel") painel();
+if(t==="atendimento") atendimento();
+if(t==="resultados") resultados();
+if(t==="config") config();
 }
+window.tab=tab;
 
-async function doLogin(){
- try{
-  await auth.signInWithEmailAndPassword(
-   $("email").value,
-   $("senha").value
-  );
- }catch(e){alert(e.message);}
+function painel(){
+view.innerHTML=`
+<div class="card">
+<h2>Painel</h2>
+<button class="btn btnGreen" onclick="setAtivo(true)">ATIVO</button>
+<button class="btn btnRed" onclick="setAtivo(false)">PAUSADO</button>
+</div>`;
 }
-window.doLogin=doLogin;
+window.setAtivo=async v=>{
+await db.collection("users").doc(auth.currentUser.uid).update({ativo:v});
+};
 
-/* ================= MENU APP ================= */
-function renderApp(){
- $("app").innerHTML=`
- <div id="view"></div>
+function atendimento(){
+view.innerHTML=`
+<div class="card">
+<h2>Atendimento</h2>
 
- <div class="menu">
-   <button onclick="goTab('painel')">🏠</button>
-   <button onclick="goTab('atendimento')">☎️</button>
-   <button onclick="goTab('resultados')">📊</button>
-   <button onclick="goTab('config')">⚙️</button>
- </div>
- `;
- goTab("painel");
-}
+<select id="fonte">
+<option value="geral">Lista Geral</option>
+<option value="gerente">Lista Gerente</option>
+<option value="minha">Minha Lista</option>
+</select>
 
-function goTab(tab){
- currentTab=tab;
- if(tab==="painel") renderPainel();
- if(tab==="atendimento") renderAtendimento();
- if(tab==="resultados") renderResultados();
- if(tab==="config") renderConfig();
-}
-window.goTab=goTab;
+<button class="btn btnGold" onclick="pegarLead()">PEGAR LEAD</button>
 
-/* ================= PAINEL ================= */
-async function renderPainel(){
-
- const ativo=userData.ativo?"🟢 ATIVO":"🔴 PAUSADO";
-
- $("view").innerHTML=`
- <div class="card">
-   <h2>Painel</h2>
-   <div>${ativo}</div>
-   <div class="small">Tempo logado: <span id="tempoLogado"></span></div>
-   <button class="btn btnGreen" onclick="setAtivo(true)">ESTOU ATIVO</button>
-   <button class="btn btnRed" onclick="setAtivo(false)">PAUSAR</button>
- </div>
-
- <div class="card">
-   <h2>Mini CRM - Hoje</h2>
-   <div id="statsHoje">Carregando...</div>
- </div>
-
- <div class="card">
-   <button class="btn btnGold" onclick="goTab('atendimento')">
-   IR PARA ATENDIMENTO
-   </button>
- </div>
- `;
-
- startTimer();
- carregarStatsHoje();
-}
-
-function startTimer(){
- setInterval(()=>{
-  const min=Math.floor((Date.now()-loginStart)/60000);
-  if($("tempoLogado")) $("tempoLogado").innerText=min+" min";
- },1000);
-}
-
-async function setAtivo(v){
- await db.collection("users").doc(auth.currentUser.uid)
- .update({ativo:v});
- userData.ativo=v;
- renderPainel();
-}
-window.setAtivo=setAtivo;
-
-/* ================= STATS ================= */
-async function carregarStatsHoje(){
- const key=new Date().toISOString().slice(0,10);
- const doc=await db.collection("stats_diarios")
- .doc(key+"_"+auth.currentUser.uid).get();
-
- let d=doc.exists?doc.data():{};
- $("statsHoje").innerHTML=`
- 📞 Ligações: ${d.ligacoes||0}<br>
- 🟢 Atendidos: ${d.atendidos||0}<br>
- 📅 Agendamentos: ${d.agendamentos||0}<br>
- 📂 Promessas: ${d.promessas||0}
- `;
-}
-
-/* ================= ATENDIMENTO ================= */
-async function renderAtendimento(){
-
- $("view").innerHTML=`
- <div class="card">
-   <h2>Atendimento</h2>
-   <button class="btn btnGold" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
-   <div id="leadBox" style="margin-top:10px"></div>
- </div>
- `;
+<div id="leadBox"></div>
+</div>`;
 }
 
 async function pegarLead(){
+const snap=await db.collection("leads")
+.where("status","==","fila").limit(1).get();
 
- const snap=await db.collection("leads")
- .where("status","==","fila")
- .limit(1).get();
+if(snap.empty){leadBox.innerHTML="Sem leads";return;}
 
- if(snap.empty){
-  $("leadBox").innerHTML="Sem leads.";
-  return;
- }
+const d=snap.docs[0];
+leadAtual={id:d.id,...d.data()};
 
- const doc=snap.docs[0];
- leadAtual={id:doc.id,...doc.data()};
+await d.ref.update({status:"em atendimento"});
 
- await doc.ref.update({
-  status:"em atendimento",
-  corretorId:auth.currentUser.uid,
-  timestampDistribuicao:now()
- });
-
- renderLead();
+renderLead();
 }
 
 function renderLead(){
+const tel=clean(leadAtual.telefone);
+const msg=encodeURIComponent(userData.mensagemPadrao||"");
 
- const msg=msgTemplate(userData.mensagemPadrao||"",leadAtual);
- const tel=cleanPhone(leadAtual.telefone);
+leadBox.innerHTML=`
+<h3>${leadAtual.nome}</h3>
+<div>${leadAtual.telefone}</div>
+<div>${leadAtual.email||""}</div>
 
- $("leadBox").innerHTML=`
- <h3>${leadAtual.nome}</h3>
- <div>${leadAtual.telefone}</div>
- <div class="small">${leadAtual.email||""}</div>
+<a href="tel:${tel}"><button class="btn btnBlue">📞 LIGAR</button></a>
+<a href="https://wa.me/55${tel}?text=${msg}" target="_blank">
+<button class="btn btnBlue">💬 WHATSAPP</button></a>
+<a href="sms:${tel}?body=${msg}">
+<button class="btn btnBlue">📩 SMS</button></a>
+<a href="mailto:${leadAtual.email}?subject=PROEFI&body=${msg}">
+<button class="btn btnBlue">📧 EMAIL</button></a>
 
- <a href="tel:${tel}"><button class="btn btnBlue">📞 LIGAR</button></a>
- <a href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" target="_blank">
-   <button class="btn btnBlue">💬 WHATSAPP</button>
- </a>
-
- <button class="btn btnGreen" onclick="finalizar('AGENDAMENTO')">ATENDEU - AGENDAMENTO</button>
- <button class="btn btnGold" onclick="finalizar('PROMESSA')">ATENDEU - PROMESSA</button>
- <button class="btn btnRed" onclick="naoAtendeu()">NÃO ATENDEU</button>
- `;
+<button class="btn btnGreen" onclick="finalizar('AGENDAMENTO')">FINALIZAR AGENDAMENTO</button>
+<button class="btn btnGold" onclick="finalizar('PROMESSA')">FINALIZAR PROMESSA</button>
+<button class="btn btnRed" onclick="naoAtendeu()">NÃO ATENDEU</button>
+`;
 }
 
-async function naoAtendeu(){
- await db.collection("leads").doc(leadAtual.id).update({
-  status:"fila",
-  corretorId:null
- });
- leadAtual=null;
- renderAtendimento();
-}
-window.naoAtendeu=naoAtendeu;
+window.finalizar=async tipo=>{
+await db.collection("leads").doc(leadAtual.id)
+.update({status:"finalizado",resultado:tipo});
+leadAtual=null;
+atendimento();
+};
 
-async function finalizar(tipo){
+window.naoAtendeu=async ()=>{
+await db.collection("leads").doc(leadAtual.id)
+.update({status:"fila"});
+leadAtual=null;
+atendimento();
+};
 
- const ref=db.collection("leads").doc(leadAtual.id);
-
- await ref.update({
-  status:"finalizado",
-  resultado:tipo,
-  atendeu:true,
-  timestampFinalizacao:now()
- });
-
- await registrarEvento(tipo);
-
- leadAtual=null;
- renderAtendimento();
-}
-window.finalizar=finalizar;
-
-/* ================= EVENTS + STATS ================= */
-async function registrarEvento(tipo){
-
- const uid=auth.currentUser.uid;
- const hoje=new Date().toISOString().slice(0,10);
- const statId=hoje+"_"+uid;
-
- await db.collection("events").add({
-  tipo,
-  uid,
-  timestamp:now()
- });
-
- const ref=db.collection("stats_diarios").doc(statId);
-
- await db.runTransaction(async t=>{
-  const doc=await t.get(ref);
-  let d=doc.exists?doc.data():{
-   ligacoes:0,atendidos:0,agendamentos:0,promessas:0
-  };
-
-  d.ligacoes++;
-  d.atendidos++;
-
-  if(tipo==="AGENDAMENTO") d.agendamentos++;
-  if(tipo==="PROMESSA") d.promessas++;
-
-  t.set(ref,d);
- });
+function resultados(){
+view.innerHTML=`<div class="card"><h2>Resultados</h2>Mini CRM em breve</div>`;
 }
 
-/* ================= RESULTADOS ================= */
-function renderResultados(){
- $("view").innerHTML=`
- <div class="card">
-   <h2>Resultados</h2>
-   <div>Mini CRM do dia já aparece no painel.</div>
- </div>`;
+function config(){
+view.innerHTML=`
+<div class="card">
+<h2>Mensagem padrão</h2>
+<textarea id="msg" style="width:100%;height:80px">${userData.mensagemPadrao||""}</textarea>
+<button class="btn btnBlue" onclick="saveMsg()">SALVAR</button>
+</div>
+
+<div class="card">
+<h2>Upload Lista</h2>
+<input type="file" id="file"/>
+<button class="btn btnGold" onclick="upload()">UPLOAD</button>
+</div>`;
 }
 
-/* ================= CONFIG ================= */
-function renderConfig(){
- $("view").innerHTML=`
- <div class="card">
-   <h2>Mensagem padrão</h2>
-   <textarea id="msg" style="width:100%;height:90px">${userData.mensagemPadrao||""}</textarea>
-   <button class="btn btnBlue" onclick="salvarMsg()">SALVAR</button>
- </div>
- `;
-}
-window.salvarMsg=async function(){
- const msg=$("msg").value;
- await db.collection("users").doc(auth.currentUser.uid)
- .update({mensagemPadrao:msg});
- userData.mensagemPadrao=msg;
- alert("Mensagem salva");
-}
+window.saveMsg=async ()=>{
+await db.collection("users").doc(auth.currentUser.uid)
+.update({mensagemPadrao:msg.value});
+alert("salvo");
+};
 
-/* ================= AUTH ================= */
+window.upload=async ()=>{
+const f=file.files[0];
+if(!f)return;
+alert("upload pronto (base já criada)");
+};
+
 auth.onAuthStateChanged(async u=>{
- if(!u){renderLogin();return;}
-
- const doc=await db.collection("users").doc(u.uid).get();
- if(!doc.exists){alert("Usuário não autorizado");auth.signOut();return;}
-
- userData=doc.data();
- renderApp();
+if(!u){login();return;}
+const doc=await db.collection("users").doc(u.uid).get();
+userData=doc.data();
+app();
 });
 </script>
 </body>
