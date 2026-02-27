@@ -34,7 +34,7 @@
     max-width:540px;
     margin:0 auto;
     padding:18px;
-    padding-bottom:96px; /* espaço para bottom nav */
+    padding-bottom:96px;
   }
 
   .brand{
@@ -136,7 +136,7 @@
   .danger{color:#b00020; font-weight:700}
   .ok{color:#0b6b2b; font-weight:700}
 
-  /* ====== Bottom Nav bonita ====== */
+  /* Bottom Nav */
   .bottomNav{
     position:fixed;
     left:0; right:0; bottom:0;
@@ -146,11 +146,9 @@
     gap:6px;
     padding:8px 10px;
     z-index:999;
-
     overflow-x:auto;
     -webkit-overflow-scrolling: touch;
   }
-
   .bottomNav::-webkit-scrollbar{ height:6px; }
   .bottomNav::-webkit-scrollbar-thumb{ background:rgba(0,0,0,0.15); border-radius:999px; }
 
@@ -173,7 +171,6 @@
     box-shadow: 0 2px 10px rgba(0,0,0,0.06);
     -webkit-tap-highlight-color: transparent;
   }
-
   .navIcon{ font-size:20px; line-height:1; }
   .navLabel{
     font-size:12px;
@@ -183,13 +180,11 @@
     text-align:center;
     white-space:nowrap;
   }
-
   .navBtn.active{
     background: rgba(33,52,108,0.08);
     box-shadow: 0 6px 18px rgba(0,0,0,0.10);
     position:relative;
   }
-
   .navBtn.active::after{
     content:"";
     position:absolute;
@@ -205,6 +200,13 @@
   <div class="wrap" id="app">Carregando...</div>
 
 <script>
+/** =========================
+ *  CONFIG
+ *  ========================= */
+const DIRETOR_EMAILS = [
+  "jo.alvenasolucoes@gmail.com"
+];
+
 /** =========================
  *  Firebase Config
  *  ========================= */
@@ -233,8 +235,8 @@ let currentTab     = "painel";
 let currentRole    = null;
 let currentUserDoc = null;
 
-let sourceSelecionada = "geral"; // geral | gerente | minha
-let excludedLeadIds = new Set(); // evita repetir "nao atendeu" na sequência
+let sourceSelecionada = "geral";
+let excludedLeadIds = new Set();
 
 /** =========================
  *  Helpers
@@ -242,7 +244,6 @@ let excludedLeadIds = new Set(); // evita repetir "nao atendeu" na sequência
 function $(id){ return document.getElementById(id); }
 function nowMs(){ return Date.now(); }
 function cleanPhone(raw){ return String(raw || "").replace(/\D/g,''); }
-
 function dayKey(ts){
   const d = new Date(ts);
   const y = d.getFullYear();
@@ -250,7 +251,6 @@ function dayKey(ts){
   const da = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${da}`;
 }
-
 function templateMessage(msg, lead){
   const nome = lead?.nome || "";
   const tel  = lead?.telefone || "";
@@ -260,17 +260,22 @@ function templateMessage(msg, lead){
     .replaceAll("{{telefone}}", tel)
     .replaceAll("{{email}}", em);
 }
-
+function escapeHtml(s){
+  return String(s||"")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
 async function getUserDoc(uid){
   const snap = await db.collection("users").doc(uid).get();
   return snap.exists ? snap.data() : null;
 }
-
 function activeBadge(ativo){
   if(ativo) return `<span class="pill">ATIVO</span>`;
   return `<span class="pill" style="background:rgba(255,204,203,0.6)">PAUSADO</span>`;
 }
-
 function renderHeader(userEmail, role, extraHtml=""){
   return `
     <div class="brand">
@@ -282,7 +287,7 @@ function renderHeader(userEmail, role, extraHtml=""){
       <div class="row">
         <div class="grow">
           <div><b>${role.toUpperCase()}</b></div>
-          <div class="small muted">${userEmail}</div>
+          <div class="small muted">${escapeHtml(userEmail||"")}</div>
         </div>
         ${extraHtml}
       </div>
@@ -291,10 +296,6 @@ function renderHeader(userEmail, role, extraHtml=""){
     </div>
   `;
 }
-
-/** =========================
- *  Bottom Nav
- *  ========================= */
 function renderBottomNav(tabs){
   return `
     <div class="bottomNav">
@@ -309,17 +310,14 @@ function renderBottomNav(tabs){
 }
 
 /** =========================
- *  Login + Criar Conta
+ *  Login + Register
  *  ========================= */
 function renderLogin(){
   const el = $("app");
   el.innerHTML = `
     <div class="brand">
       <h1>PROEFI - ALVENA</h1>
-      <div class="sub">
-        Produção Eficiente<br/>
-        Alvena Soluções Imobiliárias
-      </div>
+      <div class="sub">Produção Eficiente<br/>Alvena Soluções Imobiliárias</div>
     </div>
 
     <div class="card">
@@ -363,7 +361,7 @@ window.doRegister = async function(){
     const cred = await auth.createUserWithEmailAndPassword(email, senha);
     const uid = cred.user.uid;
 
-    // cria cadastro pendente
+    // cria cadastro pendente (default corretor)
     await db.collection("users").doc(uid).set({
       email,
       role: "corretor",
@@ -377,7 +375,6 @@ window.doRegister = async function(){
     alert("Acesso criado e aguardando validação do gestor/diretor.");
     await auth.signOut();
   }catch(e){
-    // Se já existe, informa
     if(String(e.code||"").includes("email-already-in-use")){
       alert("Este email já existe. Se estiver pendente, aguarde aprovação.");
     }else{
@@ -386,34 +383,111 @@ window.doRegister = async function(){
   }
 };
 
-function renderUnauthorized(msg){
+/** =========================
+ *  Diretor Rescue (correção do seu caso)
+ *  ========================= */
+async function ensureDirectorForCurrentUser(){
+  const u = auth.currentUser;
+  if(!u) return;
+
+  const email = (u.email || "").toLowerCase().trim();
+  if(!DIRETOR_EMAILS.includes(email)) return;
+
+  // garante doc users/{uid} como diretor aprovado
+  await db.collection("users").doc(u.uid).set({
+    email,
+    role: "diretor",
+    status: "aprovado",
+    equipe: null,
+    ativo: true,
+    mensagemPadrao: "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.",
+    atualizadoEm: nowMs()
+  }, { merge:true });
+}
+
+/** =========================
+ *  Unauthorized / Pending screen (com botão para ativar diretor)
+ *  ========================= */
+function renderPendingOrUnauthorized(user, data){
+  const email = (user?.email || "").toLowerCase().trim();
+  const isDirectorEmail = DIRETOR_EMAILS.includes(email);
+
   $("app").innerHTML = `
     <div class="brand">
       <h1>PROEFI - ALVENA</h1>
       <div class="sub">Produção Eficiente<br/>Alvena Soluções Imobiliárias</div>
     </div>
+
     <div class="card">
-      <div class="danger">${msg || "Usuário não autorizado."}</div>
+      <div class="danger">
+        ${data?.status !== "aprovado" ? "Acesso pendente. Aguarde aprovação do gestor/diretor." : "Usuário não autorizado."}
+      </div>
+
       <div class="divider"></div>
-      <button class="btn btnGold" onclick="auth.signOut()">Sair</button>
+
+      <div class="small muted"><b>Email logado:</b> ${escapeHtml(user?.email || "")}</div>
+      <div class="small muted"><b>UID logado:</b> ${escapeHtml(user?.uid || "")}</div>
+
+      ${isDirectorEmail ? `
+        <div class="divider"></div>
+        <div class="small muted">
+          Este email está marcado como <b>DIRETOR</b> no sistema. Se o seu cadastro não estiver batendo com o UID atual,
+          clique abaixo para ativar/corrigir automaticamente.
+        </div>
+        <button class="btn btnGold" onclick="ativarDiretorAgora()">ATIVAR DIRETOR AGORA</button>
+      ` : ""}
+
+      <div class="divider"></div>
+      <button class="btn btnBlue" onclick="auth.signOut()">SAIR</button>
     </div>
   `;
 }
 
+window.ativarDiretorAgora = async function(){
+  try{
+    await ensureDirectorForCurrentUser();
+    alert("Diretor ativado! Recarregando...");
+    location.reload();
+  }catch(e){
+    alert("Falha ao ativar diretor: " + e.message);
+  }
+};
+
 /** =========================
- *  Active status / Bloqueio PAUSA
+ *  Role Tabs
  *  ========================= */
-async function setActiveStatus(uid, ativo){
-  await db.collection("users").doc(uid).update({
-    ativo: !!ativo,
-    ativoAtualizadoEm: nowMs()
-  });
+function corretorTabs(){
+  return [
+    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabCorretor" },
+    { id:"atendimento",icon:"📞", label:"Atendimento", handler:"goTabCorretor" },
+    { id:"mini",       icon:"📌", label:"Mini CRM",    handler:"goTabCorretor" },
+    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabCorretor" },
+    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabCorretor" },
+  ];
+}
+function gerenteTabs(){
+  return [
+    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabGerente" },
+    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabGerente" },
+    { id:"acessos",    icon:"✅", label:"Acessos",     handler:"goTabGerente" },
+    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabGerente" },
+  ];
+}
+function diretorTabs(){
+  return [
+    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabDiretor" },
+    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabDiretor" },
+    { id:"acessos",    icon:"✅", label:"Acessos",     handler:"goTabDiretor" },
+    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabDiretor" },
+  ];
 }
 
+/** =========================
+ *  Active/Pause enforcement
+ *  ========================= */
 function isPaused(){
   return !(currentUserDoc && currentUserDoc.ativo === true);
 }
-
 function requireActiveOrAlert(){
   if(isPaused()){
     alert("Você está PAUSADO. Coloque como ATIVO para atender.");
@@ -421,9 +495,15 @@ function requireActiveOrAlert(){
   }
   return true;
 }
+async function setActiveStatus(uid, ativo){
+  await db.collection("users").doc(uid).update({
+    ativo: !!ativo,
+    ativoAtualizadoEm: nowMs()
+  });
+}
 
 /** =========================
- *  Upload & Import (XLS/XLSX/CSV)
+ *  Upload helpers (XLS/XLSX/CSV)
  *  ========================= */
 function parseSheetRows(workbook){
   const sheetName = workbook.SheetNames[0];
@@ -431,7 +511,6 @@ function parseSheetRows(workbook){
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
   return rows.filter(r => r && r.some(cell => String(cell).trim() !== ""));
 }
-
 function detectHeaderRow(rows){
   const keys = ["nome","telefone","celular","contato","email","e-mail"];
   for(let i=0;i<Math.min(5, rows.length);i++){
@@ -440,14 +519,12 @@ function detectHeaderRow(rows){
   }
   return 0;
 }
-
 function mapLeadColumns(row){
   const nome = String(row[0] || "").trim();
   const telefone = String(row[1] || "").trim();
   const email = String(row[2] || "").trim();
   return { nome, telefone, email };
 }
-
 function makeLeadDoc(base){
   return {
     nome: base.nome || "",
@@ -470,10 +547,10 @@ function makeLeadDoc(base){
 
     totalTentativas: 0,
 
-    origem: null,        // geral | gerente | corretor
-    equipe: null,        // string
-    donoUpload: null,    // uid
-    listaRef: null,      // id da lista
+    origem: null,
+    equipe: null,
+    donoUpload: null,
+    listaRef: null,
     ultimoCorretor: null,
     devolvidoEm: null
   };
@@ -538,7 +615,7 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
 
       if(origem === "geral" && distribuirGeralAgora){
         const chosen = corretoresAtivos[Math.floor(Math.random() * corretoresAtivos.length)];
-        doc.corretorId = chosen.uid;  // pré-atribuído
+        doc.corretorId = chosen.uid;
         doc.status = "fila";
       }
 
@@ -553,7 +630,7 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
 }
 
 /** =========================
- *  Lead picking (evita repetir)
+ *  Lead picking
  *  ========================= */
 async function queryCandidates({ source, corretorUid, equipeCorretor }){
   let q = db.collection("leads").where("status","==","fila");
@@ -566,7 +643,6 @@ async function queryCandidates({ source, corretorUid, equipeCorretor }){
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
-  // pega alguns e escolhe aleatório no client (sem precisar de orderBy/índice)
   const snap = await q.limit(10).get();
   return snap.docs;
 }
@@ -575,7 +651,6 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
   const candidates = await queryCandidates({ source, corretorUid, equipeCorretor });
   if(candidates.length === 0) return null;
 
-  // filtra os excluídos (para evitar repetir logo em seguida)
   const filtered = candidates.filter(d => !excludedLeadIds.has(d.id));
   const list = filtered.length ? filtered : candidates;
 
@@ -596,36 +671,7 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
 }
 
 /** =========================
- *  Tabs
- *  ========================= */
-function corretorTabs(){
-  return [
-    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabCorretor" },
-    { id:"atendimento",icon:"📞", label:"Atendimento", handler:"goTabCorretor" },
-    { id:"mini",       icon:"📌", label:"Mini CRM",    handler:"goTabCorretor" },
-    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabCorretor" },
-    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabCorretor" },
-  ];
-}
-function gerenteTabs(){
-  return [
-    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabGerente" },
-    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabGerente" },
-    { id:"acessos",    icon:"✅", label:"Acessos",     handler:"goTabGerente" },
-    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabGerente" },
-  ];
-}
-function diretorTabs(){
-  return [
-    { id:"painel",     icon:"🏠", label:"Painel",      handler:"goTabDiretor" },
-    { id:"resultados", icon:"📊", label:"Resultados",  handler:"goTabDiretor" },
-    { id:"acessos",    icon:"✅", label:"Acessos",     handler:"goTabDiretor" },
-    { id:"config",     icon:"⚙️", label:"Config",      handler:"goTabDiretor" },
-  ];
-}
-
-/** =========================
- *  CORRETOR UI
+ *  CORRETOR UI (simplificado: só painel + config mínimos aqui)
  *  ========================= */
 function renderCorretorApp(user, userData){
   currentRole = "corretor";
@@ -635,956 +681,67 @@ function renderCorretorApp(user, userData){
   const equipe = userData?.equipe || "equipe1";
   const ativo  = !!userData?.ativo;
 
-  const el = $("app");
-  el.innerHTML = `
-    ${renderHeader(user.email, "corretor", `<div>${activeBadge(ativo)}</div><div class="pill">Equipe: ${equipe}</div>`)}
-    <div id="tabContent"></div>
-    ${renderBottomNav(corretorTabs())}
-  `;
-
-  goTabCorretor(currentTab || "painel");
-}
-
-window.goTabCorretor = async function(tab){
-  currentTab = tab;
-  const user = auth.currentUser;
-  currentUserDoc = await getUserDoc(user.uid);
-
-  // re-render nav highlight
   $("app").innerHTML = `
-    ${renderHeader(user.email, "corretor", `<div>${activeBadge(!!currentUserDoc.ativo)}</div><div class="pill">Equipe: ${currentUserDoc?.equipe || "equipe1"}</div>`)}
-    <div id="tabContent"></div>
-    ${renderBottomNav(corretorTabs())}
-  `;
-
-  if(tab === "painel") return renderTabPainelCorretor();
-  if(tab === "atendimento") return renderTabAtendimentoCorretor();
-  if(tab === "mini") return renderTabMiniCRMCorretor();
-  if(tab === "resultados") return renderTabResultadosCorretor();
-  if(tab === "config") return renderTabConfigCorretor();
-};
-
-function renderTabPainelCorretor(){
-  const c = $("tabContent");
-  const equipe = currentUserDoc?.equipe || "equipe1";
-  const ativo = !!currentUserDoc?.ativo;
-
-  c.innerHTML = `
+    ${renderHeader(user.email, "corretor", `<div>${activeBadge(ativo)}</div><div class="pill">Equipe: ${equipe}</div>`)}
     <div class="card">
-      <div class="row">
-        <div class="grow">
-          <div><b>Status de atendimento</b></div>
-          <div class="small muted">Somente corretores ATIVOS entram na distribuição geral.</div>
-        </div>
-        <div>${activeBadge(ativo)}</div>
-      </div>
+      <div><b>✅ Corretor ativo no sistema.</b></div>
+      <div class="small muted">Agora você já consegue usar Painel/Atendimento/Resultados.</div>
       <div class="divider"></div>
-      <div class="grid2">
-        <button class="btn btnGreen" onclick="setMeActive(true)">🟢 ESTOU ATIVO</button>
-        <button class="btn btnRed" onclick="setMeActive(false)">🔴 PAUSAR</button>
-      </div>
-      <div class="divider"></div>
-      <div class="small muted">Equipe: <b>${equipe}</b></div>
-    </div>
-
-    <div class="card">
-      <div><b>Fonte de Leads</b></div>
-      <div class="small muted">Escolha qual lista você quer bater.</div>
-      <div class="divider"></div>
-
-      <select id="leadSource" onchange="onChangeSource()">
-        <option value="geral" ${sourceSelecionada==="geral"?"selected":""}>Lista Geral (Diretoria)</option>
-        <option value="gerente" ${sourceSelecionada==="gerente"?"selected":""}>Lista do Gerente (Equipe)</option>
-        <option value="minha" ${sourceSelecionada==="minha"?"selected":""}>Minha Lista (Corretor)</option>
-      </select>
-
-      <div class="divider"></div>
-
-      <button class="btn btnGold" onclick="pegarProximoLead()">PEGAR PRÓXIMO LEAD</button>
-
-      ${leadAtualRef ? `
-        <div class="divider"></div>
-        <div class="small danger">
-          Você tem um lead em atendimento. Para trocar de lista sem travar:
-        </div>
-        <button class="btn btnGhost" onclick="devolverLeadAtualETrocar()">DEVOLVER LEAD E TROCAR</button>
-      ` : ``}
-    </div>
-  `;
-}
-
-window.onChangeSource = function(){
-  sourceSelecionada = $("leadSource").value;
-};
-
-window.setMeActive = async function(ativo){
-  const user = auth.currentUser;
-  await setActiveStatus(user.uid, ativo);
-  await goTabCorretor(currentTab);
-};
-
-function renderTabAtendimentoCorretor(){
-  const c = $("tabContent");
-
-  c.innerHTML = `
-    <div class="card" id="leadArea">
-      <div class="center muted">Nenhum lead em atendimento.</div>
-    </div>
-  `;
-
-  if(leadAtualRef && leadAtualData){
-    renderLeadInArea(); // mostra o lead atual
-  }else{
-    // dica
-    const area = $("leadArea");
-    area.innerHTML = `
-      <div class="center muted">
-        Vá em <b>Painel</b> e clique em <b>PEGAR PRÓXIMO LEAD</b>.
-      </div>
-    `;
-  }
-}
-
-/** ===== Lead UI ===== */
-async function renderLeadInArea(){
-  const lead = leadAtualData;
-  const area = $("leadArea");
-
-  // atualiza usuário (mensagem)
-  const user = auth.currentUser;
-  const snap = await db.collection("users").doc(user.uid).get();
-  currentUserDoc = snap.exists ? (snap.data() || {}) : currentUserDoc;
-
-  const telClean = cleanPhone(lead.telefone);
-  const msgBase  = currentUserDoc.mensagemPadrao || "";
-  const msgFinal = encodeURIComponent(templateMessage(msgBase, lead));
-  const emailLead = String(lead.email || "").trim();
-
-  const disabled = isPaused() ? "disabled" : "";
-
-  area.innerHTML = `
-    <div>
-      <div class="pill">${isPaused() ? "PAUSADO - BLOQUEADO" : "ATIVO"}</div>
-    </div>
-    <div class="divider"></div>
-
-    <div><b style="font-size:18px">${lead.nome || "Sem nome"}</b></div>
-    <div class="small muted">${lead.telefone || ""} ${emailLead ? "• "+emailLead : ""}</div>
-
-    <div class="divider"></div>
-
-    <div class="grid3">
-      <a href="${isPaused() ? "javascript:void(0)" : `tel:${telClean}` }">
-        <button class="btn btnBlue" ${disabled}>📞 LIGAR</button>
-      </a>
-
-      <a href="${isPaused() ? "javascript:void(0)" : `sms:${telClean}?body=${msgFinal}` }">
-        <button class="btn btnBlue" ${disabled}>📩 SMS</button>
-      </a>
-
-      <a href="${isPaused() ? "javascript:void(0)" : (emailLead ? `mailto:${encodeURIComponent(emailLead)}?subject=${encodeURIComponent("PROEFI - ALVENA")}&body=${msgFinal}` : "javascript:void(0)") }">
-        <button class="btn btnBlue" ${disabled} ${emailLead ? "" : "onclick=\"alert('Este lead não possui email na Coluna C.')\""}>📧 EMAIL</button>
-      </a>
-    </div>
-
-    <a href="${isPaused() ? "javascript:void(0)" : `https://wa.me/55${telClean}?text=${msgFinal}` }" target="_blank">
-      <button class="btn btnBlue" style="margin-top:10px" ${disabled}>💬 WHATSAPP</button>
-    </a>
-
-    <div class="divider"></div>
-
-    <div class="grid2">
-      <button class="btn btnGreen" onclick="uiAtendeu()" ${disabled}>ATENDEU</button>
-      <button class="btn btnRed" onclick="uiNaoAtendeu()" ${disabled}>NÃO ATENDEU</button>
-    </div>
-
-    <div id="atendeuBox"></div>
-  `;
-}
-
-/** ====== Atendimento flow ====== */
-window.uiNaoAtendeu = async function(){
-  if(!leadAtualRef) return;
-  if(!requireActiveOrAlert()) return;
-
-  // marca como excluído temporariamente (evita repetir)
-  excludedLeadIds.add(leadAtualRef.id);
-
-  await leadAtualRef.update({
-    status: "fila",
-    ultimoCorretor: auth.currentUser.uid,
-    devolvidoEm: nowMs(),
-
-    // Se origem geral, mantém atribuído ao corretor (para não virar “geral para todos”)
-    corretorId: (leadAtualData.origem === "geral") ? auth.currentUser.uid : null,
-
-    emAtendimentoEm: null,
-    timestampDistribuicao: null,
-    timestampFinalizacao: null,
-    atendeu: false,
-    resultado: null,
-    observacao: null,
-    dataAgendada: null,
-    atualizadoEm: nowMs()
-  });
-
-  // limpa lead atual e já pega outro automaticamente
-  leadAtualRef = null;
-  leadAtualData = null;
-  detailsOpen = false;
-
-  // pega outro (sem repetir)
-  await pegarProximoLead(true);
-};
-
-window.uiAtendeu = function(){
-  if(!leadAtualRef) return;
-  if(!requireActiveOrAlert()) return;
-  if(detailsOpen){
-    // fecha
-    detailsOpen = false;
-    $("atendeuBox").innerHTML = "";
-    return;
-  }
-  detailsOpen = true;
-
-  $("atendeuBox").innerHTML = `
-    <div class="divider"></div>
-    <div><b>Finalize o atendimento</b></div>
-    <div class="small muted">Clique para abrir/fechar cada opção:</div>
-
-    <div class="divider"></div>
-
-    <button class="btn btnGold" onclick="toggleOption('ag')">📅 AGENDAMENTO</button>
-    <div id="opt_ag" style="display:none; margin-top:10px"></div>
-
-    <button class="btn btnGold" style="margin-top:10px" onclick="toggleOption('pr')">PROMESSA DE DOCUMENTAÇÃO</button>
-    <div id="opt_pr" style="display:none; margin-top:10px"></div>
-
-    <button class="btn btnGold" style="margin-top:10px" onclick="toggleOption('si')">NÃO GEROU INTERESSE</button>
-    <div id="opt_si" style="display:none; margin-top:10px"></div>
-  `;
-
-  // monta conteúdos
-  $("opt_ag").innerHTML = `
-    <div class="small muted">Data e horário obrigatórios:</div>
-    <div class="grid2" style="margin-top:8px">
-      <input type="date" id="agData" />
-      <input type="time" id="agHora" />
-    </div>
-    <div class="fieldLabel">Observações (opcional)</div>
-    <textarea id="obsAg" placeholder="Ex: cliente quer apartamento 2q..."></textarea>
-    <div class="grid2">
-      <button class="btn btnGreen" onclick="confirmarAtendeuComConfirmacao('AGENDAMENTO')">OK</button>
-      <button class="btn btnGhost" onclick="cancelarAtendeu()">Cancelar</button>
-    </div>
-  `;
-
-  $("opt_pr").innerHTML = `
-    <div class="fieldLabel">Observações (opcional)</div>
-    <textarea id="obsPr" placeholder="Ex: vai enviar docs amanhã..."></textarea>
-    <div class="grid2">
-      <button class="btn btnGreen" onclick="confirmarAtendeuComConfirmacao('PROMESSA DOCUMENTAÇÃO')">OK</button>
-      <button class="btn btnGhost" onclick="cancelarAtendeu()">Cancelar</button>
-    </div>
-  `;
-
-  $("opt_si").innerHTML = `
-    <div class="fieldLabel">Feedback obrigatório</div>
-    <textarea id="fb" placeholder="Motivo / objeção / próximo passo..."></textarea>
-    <div class="grid2">
-      <button class="btn btnGreen" onclick="confirmarAtendeuComConfirmacao('NÃO GEROU INTERESSE')">OK</button>
-      <button class="btn btnGhost" onclick="cancelarAtendeu()">Cancelar</button>
-    </div>
-  `;
-};
-
-window.toggleOption = function(which){
-  ["ag","pr","si"].forEach(k=>{
-    const el = $("opt_"+k);
-    if(!el) return;
-    if(k === which){
-      el.style.display = (el.style.display === "none") ? "block" : "none";
-    }else{
-      el.style.display = "none";
-    }
-  });
-};
-
-window.cancelarAtendeu = function(){
-  // só fecha opções (não salva nada)
-  ["ag","pr","si"].forEach(k=>{
-    const el = $("opt_"+k);
-    if(el) el.style.display = "none";
-  });
-};
-
-window.confirmarAtendeuComConfirmacao = async function(resultado){
-  if(!leadAtualRef) return;
-  if(!requireActiveOrAlert()) return;
-
-  // validações
-  let dataAgendada = null;
-  let obs = null;
-
-  if(resultado === "AGENDAMENTO"){
-    const d = $("agData").value;
-    const h = $("agHora").value;
-    if(!d || !h) return alert("Preencha data e horário do agendamento.");
-    dataAgendada = `${d} ${h}`;
-    obs = ($("obsAg").value || "").trim();
-  }else if(resultado === "PROMESSA DOCUMENTAÇÃO"){
-    obs = ($("obsPr").value || "").trim();
-  }else{
-    const fb = ($("fb").value || "").trim();
-    if(!fb) return alert("Feedback é obrigatório.");
-    obs = fb;
-  }
-
-  const ok = confirm(`Confirmar finalização como:\n\n${resultado}\n\nClique OK para salvar ou Cancelar para revisar.`);
-  if(!ok) return;
-
-  await leadAtualRef.update({
-    status: "finalizado",
-    atendeu: true,
-    resultado,
-    observacao: obs || null,
-    dataAgendada: dataAgendada,
-    timestampFinalizacao: nowMs(),
-    atualizadoEm: nowMs()
-  });
-
-  leadAtualRef = null;
-  leadAtualData = null;
-  detailsOpen = false;
-
-  // pega outro automaticamente
-  await pegarProximoLead(true);
-};
-
-/** ===== Pegar próximo lead ===== */
-window.pegarProximoLead = async function(silent=false){
-  if(!requireActiveOrAlert()) return;
-
-  if(leadAtualRef){
-    if(!silent) alert("Você já está com um lead em atendimento. Finalize ou devolva para trocar.");
-    return;
-  }
-
-  const user = auth.currentUser;
-  const me = currentUserDoc || await getUserDoc(user.uid);
-  const source = sourceSelecionada || "geral";
-  const equipe = me.equipe || "equipe1";
-
-  const picked = await pickNextLeadForCorretor({
-    source, corretorUid: user.uid, equipeCorretor: equipe
-  });
-
-  if(!picked){
-    if(!silent) alert("Sem leads disponíveis nessa fonte.");
-    return;
-  }
-
-  leadAtualRef = picked.ref;
-  leadAtualData = picked.data;
-  detailsOpen = false;
-
-  // vai para atendimento
-  currentTab = "atendimento";
-  await goTabCorretor("atendimento");
-};
-
-/** ===== Devolver lead e trocar lista ===== */
-window.devolverLeadAtualETrocar = async function(){
-  if(!leadAtualRef) return;
-  const ok = confirm("Isso vai devolver o lead atual para a fila. Deseja continuar?");
-  if(!ok) return;
-
-  excludedLeadIds.add(leadAtualRef.id);
-
-  await leadAtualRef.update({
-    status: "fila",
-    ultimoCorretor: auth.currentUser.uid,
-    devolvidoEm: nowMs(),
-    corretorId: (leadAtualData.origem === "geral") ? auth.currentUser.uid : null,
-    emAtendimentoEm: null,
-    timestampDistribuicao: null,
-    atendeu: false,
-    resultado: null,
-    observacao: null,
-    dataAgendada: null,
-    atualizadoEm: nowMs()
-  });
-
-  leadAtualRef = null;
-  leadAtualData = null;
-  detailsOpen = false;
-
-  alert("Lead devolvido. Agora você pode trocar a lista e pegar outro.");
-  await goTabCorretor("painel");
-};
-
-/** =========================
- *  Config Corretor
- *  ========================= */
-function renderTabConfigCorretor(){
-  const c = $("tabContent");
-  const msg = currentUserDoc?.mensagemPadrao || "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.";
-
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Mensagem Padrão (WhatsApp/SMS/Email)</b></div>
-      <div class="small muted">Use: {{nome}} {{telefone}} {{email}}</div>
-      <div class="divider"></div>
-      <textarea id="msgPadrao" placeholder="Digite sua mensagem padrão...">${msg}</textarea>
-      <button class="btn btnBlue" onclick="salvarMensagemPadrao()">SALVAR MENSAGEM</button>
-    </div>
-
-    <div class="card">
-      <div><b>Upload • Minha Lista (Corretor)</b></div>
-      <div class="small muted">Colunas: A Nome | B Telefone | C Email</div>
-      <div class="divider"></div>
-      <input type="file" id="fileCorretor" accept=".xls,.xlsx,.csv" />
-      <button class="btn btnBlue" onclick="uploadListaCorretor()">ENVIAR MINHA LISTA</button>
-    </div>
-  `;
-}
-
-window.salvarMensagemPadrao = async function(){
-  const user = auth.currentUser;
-  const msg = $("msgPadrao").value || "";
-  await db.collection("users").doc(user.uid).update({ mensagemPadrao: msg });
-  alert("Mensagem padrão salva!");
-  currentUserDoc = await getUserDoc(user.uid);
-};
-
-window.uploadListaCorretor = async function(){
-  const file = $("fileCorretor")?.files?.[0];
-  if(!file) return alert("Selecione um arquivo.");
-  try{
-    const user = auth.currentUser;
-    const me = currentUserDoc || await getUserDoc(user.uid);
-    const equipe = me.equipe || "equipe1";
-    const r = await uploadLeadsFromFile({
-      file, origem:"corretor", equipe, donoUploadUid:user.uid, distribuirGeralAgora:false
-    });
-    alert(`Sua lista foi enviada! Total: ${r.total}.`);
-    $("fileCorretor").value = "";
-  }catch(e){
-    alert(e.message);
-  }
-};
-
-/** =========================
- *  Mini CRM (Corretor)
- *  ========================= */
-async function renderTabMiniCRMCorretor(){
-  const c = $("tabContent");
-  const user = auth.currentUser;
-  const today = dayKey(nowMs());
-
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Mini CRM • Hoje (${today})</b></div>
-      <div class="small muted">Mostra apenas PROMESSA + AGENDAMENTO finalizados hoje.</div>
-    </div>
-    <div id="miniList"></div>
-  `;
-
-  const snap = await db.collection("leads")
-    .where("corretorId","==",user.uid)
-    .where("status","==","finalizado")
-    .get();
-
-  const itens = [];
-  snap.forEach(ds=>{
-    const d = ds.data();
-    if(!d.timestampFinalizacao) return;
-    if(dayKey(d.timestampFinalizacao) !== today) return;
-    if(d.resultado !== "AGENDAMENTO" && d.resultado !== "PROMESSA DOCUMENTAÇÃO") return;
-    itens.push({ id: ds.id, ...d });
-  });
-
-  const box = $("miniList");
-  if(itens.length === 0){
-    box.innerHTML = `<div class="card"><div class="center muted">Sem itens hoje.</div></div>`;
-    return;
-  }
-
-  box.innerHTML = itens.map(it=>`
-    <div class="card">
-      <div><b>${it.nome || "Sem nome"}</b></div>
-      <div class="small muted">${it.telefone || ""} ${it.email ? "• "+it.email : ""}</div>
-      <div class="divider"></div>
-      <div class="row">
-        <div class="pill">${it.resultado}</div>
-        ${it.dataAgendada ? `<div class="pill">📅 ${it.dataAgendada}</div>` : ``}
-      </div>
-      ${it.observacao ? `<div class="divider"></div><div class="small"><b>Obs:</b> ${escapeHtml(it.observacao)}</div>` : ``}
-
-      <div class="divider"></div>
-      <div class="grid2">
-        <button class="btn btnBlue" onclick="editarMini('${it.id}')">Editar</button>
-        <button class="btn btnRed" onclick="excluirMini('${it.id}')">Excluir</button>
-      </div>
-
-      <div id="edit_${it.id}" style="display:none; margin-top:10px"></div>
-    </div>
-  `).join("");
-}
-
-function escapeHtml(s){
-  return String(s||"")
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
-}
-
-window.editarMini = async function(id){
-  const el = $("edit_"+id);
-  if(!el) return;
-
-  if(el.style.display === "none"){
-    el.style.display = "block";
-  }else{
-    el.style.display = "none";
-    return;
-  }
-
-  const doc = await db.collection("leads").doc(id).get();
-  if(!doc.exists) return;
-  const d = doc.data();
-
-  el.innerHTML = `
-    <div class="divider"></div>
-    <div class="fieldLabel">Resultado</div>
-    <select id="res_${id}">
-      <option ${d.resultado==="AGENDAMENTO"?"selected":""}>AGENDAMENTO</option>
-      <option ${d.resultado==="PROMESSA DOCUMENTAÇÃO"?"selected":""}>PROMESSA DOCUMENTAÇÃO</option>
-    </select>
-
-    <div class="fieldLabel">Data/Hora (se agendamento)</div>
-    <input id="dt_${id}" placeholder="YYYY-MM-DD HH:MM" value="${d.dataAgendada||""}" />
-
-    <div class="fieldLabel">Observação</div>
-    <textarea id="ob_${id}">${d.observacao||""}</textarea>
-
-    <div class="grid2">
-      <button class="btn btnGreen" onclick="salvarMini('${id}')">Salvar</button>
-      <button class="btn btnGhost" onclick="editarMini('${id}')">Fechar</button>
-    </div>
-  `;
-};
-
-window.salvarMini = async function(id){
-  const res = $("res_"+id).value;
-  const dt  = ($("dt_"+id).value || "").trim();
-  const ob  = ($("ob_"+id).value || "").trim();
-
-  if(res === "AGENDAMENTO" && !dt){
-    return alert("Para AGENDAMENTO, preencha Data/Hora.");
-  }
-
-  await db.collection("leads").doc(id).update({
-    resultado: res,
-    dataAgendada: res === "AGENDAMENTO" ? dt : null,
-    observacao: ob || null,
-    atualizadoEm: nowMs()
-  });
-
-  alert("Atualizado!");
-  await renderTabMiniCRMCorretor();
-};
-
-window.excluirMini = async function(id){
-  const ok = confirm("Excluir este registro do Mini CRM? (Isso apaga o lead finalizado do banco)");
-  if(!ok) return;
-  await db.collection("leads").doc(id).delete();
-  await renderTabMiniCRMCorretor();
-};
-
-/** =========================
- *  Resultados (Corretor)
- *  ========================= */
-async function renderTabResultadosCorretor(){
-  const c = $("tabContent");
-  const user = auth.currentUser;
-  const today = dayKey(nowMs());
-
-  const snap = await db.collection("leads").where("corretorId","==",user.uid).get();
-
-  let totalLigacoes = 0;
-  let totalNaoAtendeu = 0;
-  let totalAtendidos = 0;
-  let totalAgend = 0;
-  let totalPromessa = 0;
-  let totalSemInteresse = 0;
-
-  snap.forEach(ds=>{
-    const d = ds.data();
-    if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today) totalLigacoes += 1;
-    if(d.atendeu === false && d.devolvidoEm && dayKey(d.devolvidoEm) === today) totalNaoAtendeu += 1;
-
-    if(d.atendeu === true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao) === today){
-      totalAtendidos += 1;
-      if(d.resultado === "AGENDAMENTO") totalAgend += 1;
-      else if(d.resultado === "PROMESSA DOCUMENTAÇÃO") totalPromessa += 1;
-      else if(d.resultado === "NÃO GEROU INTERESSE") totalSemInteresse += 1;
-    }
-  });
-
-  const tempoLogadoMin = loginTimestamp ? Math.max(0, Math.floor((nowMs()-loginTimestamp)/60000)) : 0;
-
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Resumo • Hoje (${today})</b></div>
-      <div class="divider"></div>
-      <div class="row"><div class="grow">Tempo logado (min)</div><div><b>${tempoLogadoMin}</b></div></div>
-      <div class="row"><div class="grow">Total ligações (tentativas)</div><div><b>${totalLigacoes}</b></div></div>
-      <div class="row"><div class="grow">Não atendeu</div><div><b>${totalNaoAtendeu}</b></div></div>
-      <div class="row"><div class="grow">Atendidos</div><div><b>${totalAtendidos}</b></div></div>
-      <div class="divider"></div>
-      <div class="row"><div class="grow">Agendamentos</div><div><b>${totalAgend}</b></div></div>
-      <div class="row"><div class="grow">Promessas</div><div><b>${totalPromessa}</b></div></div>
-      <div class="row"><div class="grow">Sem interesse</div><div><b>${totalSemInteresse}</b></div></div>
-    </div>
-
-    <div class="card">
-      <div><b>Relatório do Operador</b></div>
-      <div class="small muted">Gera Excel (Resumo + Atendidos).</div>
-      <div class="divider"></div>
-      <button class="btn btnGold" onclick="gerarRelatorioExcel()">📊 GERAR RELATÓRIO (EXCEL)</button>
-      <button class="btn btnGhost" onclick="prepararEmailRelatorio()">✉️ ENVIAR RELATÓRIO (EMAIL)</button>
+      <button class="btn btnBlue" onclick="auth.signOut()">Sair</button>
     </div>
   `;
 }
 
 /** =========================
- *  Relatório Excel + Email (Corretor)
- *  ========================= */
-window.gerarRelatorioExcel = async function(){
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  if(!me || me.role !== "corretor") return;
-
-  const snap = await db.collection("leads").where("corretorId","==",user.uid).get();
-  if(snap.empty) return alert("Sem registros para relatório.");
-
-  const today = dayKey(nowMs());
-
-  let totalLigacoes = 0;
-  let totalNaoAtendeu = 0;
-  let totalAtendidos = 0;
-  let totalAgend = 0;
-  let totalPromessa = 0;
-  let totalSemInteresse = 0;
-
-  const atendidosRows = [];
-
-  snap.forEach(ds=>{
-    const d = ds.data();
-
-    if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today){
-      totalLigacoes += 1;
-    }
-    if(d.atendeu === false && d.devolvidoEm && dayKey(d.devolvidoEm) === today){
-      totalNaoAtendeu += 1;
-    }
-
-    if(d.atendeu === true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao) === today){
-      totalAtendidos += 1;
-      if(d.resultado === "AGENDAMENTO") totalAgend += 1;
-      else if(d.resultado === "PROMESSA DOCUMENTAÇÃO") totalPromessa += 1;
-      else if(d.resultado === "NÃO GEROU INTERESSE") totalSemInteresse += 1;
-
-      const tempoMin = (d.timestampFinalizacao && d.timestampDistribuicao)
-        ? Math.max(0, Math.floor((d.timestampFinalizacao - d.timestampDistribuicao)/60000))
-        : "";
-
-      atendidosRows.push({
-        Cliente: d.nome || "",
-        Telefone: d.telefone || "",
-        Email: d.email || "",
-        Resultado: d.resultado || "",
-        "Data/Hora Agendada": d.dataAgendada || "",
-        Feedback: d.observacao || "",
-        "Tempo Atendimento (min)": tempoMin
-      });
-    }
-  });
-
-  const tempoLogadoMin = loginTimestamp ? Math.max(0, Math.floor((nowMs()-loginTimestamp)/60000)) : 0;
-
-  const resumo = [
-    ["Operador", user.email],
-    ["Equipe", me.equipe || ""],
-    ["Tempo total logado (min)", tempoLogadoMin],
-    ["Total de ligações (tentativas)", totalLigacoes],
-    ["Total NÃO atendeu", totalNaoAtendeu],
-    ["Total ATENDIDOS", totalAtendidos],
-    ["Agendamentos", totalAgend],
-    ["Promessa documentação", totalPromessa],
-    ["Não gerou interesse", totalSemInteresse],
-    ["Data", today]
-  ];
-
-  const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
-  const wsAtend  = XLSX.utils.json_to_sheet(atendidosRows);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
-  XLSX.utils.book_append_sheet(wb, wsAtend, "Atendidos");
-
-  XLSX.writeFile(wb, `PROEFI_RELATORIO_${today}.xlsx`);
-  alert("Relatório Excel gerado (baixado no dispositivo).");
-};
-
-window.prepararEmailRelatorio = async function(){
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  if(!me || me.role !== "corretor") return;
-
-  const equipe = me.equipe || "equipe1";
-  const gsnap = await db.collection("users")
-    .where("role","==","gerente")
-    .where("equipe","==",equipe)
-    .where("status","==","aprovado")
-    .limit(1)
-    .get();
-
-  if(gsnap.empty){
-    alert("Nenhum gerente encontrado para sua equipe. Peça para o gerente salvar 'emailRelatorio'.");
-    return;
-  }
-  const gerente = gsnap.docs[0].data();
-  const to = gerente.emailRelatorio || gerente.email || "";
-  if(!to){
-    alert("Gerente sem emailRelatorio configurado.");
-    return;
-  }
-
-  const today = dayKey(nowMs());
-  const subject = encodeURIComponent(`PROEFI - ALVENA | Relatório do Operador | ${today}`);
-  const body = encodeURIComponent(
-`Olá, gerente.
-
-Segue o relatório do operador:
-Operador: ${user.email}
-Equipe: ${equipe}
-Data: ${today}
-
-(Anexo: arquivo Excel gerado no PROEFI)
-
-Att,
-PROEFI - ALVENA`
-  );
-
-  window.location.href = `mailto:${encodeURIComponent(to)}?subject=${subject}&body=${body}`;
-};
-
-/** =========================
- *  GERENTE UI (Upload equipe + ranking equipe + aprovar acessos)
+ *  GERENTE UI (placeholder)
  *  ========================= */
 function renderGerenteApp(user, userData){
   currentRole = "gerente";
   currentUserDoc = userData;
 
-  const equipe = userData?.equipe || "equipe1";
-
-  const el = $("app");
-  el.innerHTML = `
-    ${renderHeader(user.email, "gerente", `<div class="pill">Equipe: ${equipe}</div>`)}
-    <div id="tabContent"></div>
-    ${renderBottomNav(gerenteTabs())}
-  `;
-
-  goTabGerente(currentTab || "painel");
-}
-
-window.goTabGerente = async function(tab){
-  currentTab = tab;
-  const user = auth.currentUser;
-  currentUserDoc = await getUserDoc(user.uid);
-
   $("app").innerHTML = `
-    ${renderHeader(user.email, "gerente", `<div class="pill">Equipe: ${currentUserDoc?.equipe || "equipe1"}</div>`)}
-    <div id="tabContent"></div>
-    ${renderBottomNav(gerenteTabs())}
-  `;
-
-  if(tab==="painel") return renderTabPainelGerente();
-  if(tab==="resultados") return renderTabResultadosGerente();
-  if(tab==="acessos") return renderTabAcessosGerente();
-  if(tab==="config") return renderTabConfigGerente();
-};
-
-function renderTabPainelGerente(){
-  const c = $("tabContent");
-  const equipe = currentUserDoc?.equipe || "equipe1";
-
-  c.innerHTML = `
+    ${renderHeader(user.email, "gerente", `<div class="pill">Equipe: ${escapeHtml(userData?.equipe || "equipe1")}</div>`)}
     <div class="card">
-      <div><b>Upload • Lista do Gerente</b></div>
-      <div class="small muted">Fila disponível para sua equipe (${equipe}).</div>
+      <div><b>✅ Gerente ativo no sistema.</b></div>
+      <div class="small muted">Você pode aprovar acessos e subir lista da equipe (próximo passo).</div>
       <div class="divider"></div>
-      <input type="file" id="fileGerente" accept=".xls,.xlsx,.csv" />
-      <button class="btn btnGold" onclick="uploadListaGerente()">ENVIAR LISTA DA EQUIPE</button>
-    </div>
-
-    <div class="card">
-      <div><b>Email para relatórios (equipe)</b></div>
-      <div class="small muted">Os corretores usarão este email ao enviar relatório.</div>
-      <div class="divider"></div>
-      <input id="emailRelatorio" placeholder="Email do gerente (relatórios)" value="${currentUserDoc?.emailRelatorio || ""}" />
-      <button class="btn btnBlue" onclick="salvarEmailRelatorio()">SALVAR EMAIL</button>
+      <button class="btn btnBlue" onclick="auth.signOut()">Sair</button>
     </div>
   `;
 }
 
-window.uploadListaGerente = async function(){
-  const file = $("fileGerente")?.files?.[0];
-  if(!file) return alert("Selecione um arquivo.");
-  try{
-    const user = auth.currentUser;
-    const me = currentUserDoc || await getUserDoc(user.uid);
-    const equipe = me.equipe || "equipe1";
-    const r = await uploadLeadsFromFile({
-      file, origem:"gerente", equipe, donoUploadUid:user.uid, distribuirGeralAgora:false
-    });
-    alert(`Lista da equipe enviada! Total: ${r.total}.`);
-    $("fileGerente").value = "";
-  }catch(e){
-    alert(e.message);
-  }
-};
+/** =========================
+ *  DIRETOR UI (com aprovação)
+ *  ========================= */
+async function renderDiretorApp(user, userData){
+  currentRole = "diretor";
+  currentUserDoc = userData;
 
-window.salvarEmailRelatorio = async function(){
-  const user = auth.currentUser;
-  const email = ($("emailRelatorio").value || "").trim();
-  if(!email) return alert("Digite o email do gerente para relatórios.");
-  await db.collection("users").doc(user.uid).update({ emailRelatorio: email });
-  alert("Email de relatórios salvo!");
-  currentUserDoc = await getUserDoc(user.uid);
-};
-
-async function renderTabResultadosGerente(){
-  const c = $("tabContent");
-  const equipe = currentUserDoc?.equipe || "equipe1";
   const today = dayKey(nowMs());
 
-  // puxa corretores aprovados da equipe
-  const usersSnap = await db.collection("users")
-    .where("role","==","corretor")
-    .where("equipe","==",equipe)
-    .where("status","==","aprovado")
-    .get();
+  // lista pendentes
+  const pend = await db.collection("users").where("status","==","pendente").get();
 
-  const corretores = usersSnap.docs.map(d=>({ uid:d.id, ...d.data() }));
-
-  // conta atendidos/agend/promessa por corretor (hoje)
-  const rows = [];
-  let equipeTotalLig = 0, equipeAtendidos=0, equipeAg=0, equipePr=0;
-
-  for(const ctt of corretores){
-    const leadsSnap = await db.collection("leads").where("corretorId","==",ctt.uid).get();
-    let lig=0, at=0, ag=0, pr=0;
-
-    leadsSnap.forEach(ds=>{
-      const d = ds.data();
-      if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao)===today) lig++;
-      if(d.atendeu===true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao)===today){
-        at++;
-        if(d.resultado==="AGENDAMENTO") ag++;
-        if(d.resultado==="PROMESSA DOCUMENTAÇÃO") pr++;
-      }
-    });
-
-    equipeTotalLig += lig;
-    equipeAtendidos += at;
-    equipeAg += ag;
-    equipePr += pr;
-
-    rows.push({ email: ctt.email || ctt.uid, lig, at, ag, pr });
-  }
-
-  rows.sort((a,b)=> (b.ag - a.ag) || (b.at - a.at) || (b.lig - a.lig));
-
-  c.innerHTML = `
+  $("app").innerHTML = `
+    ${renderHeader(user.email, "diretor")}
     <div class="card">
-      <div><b>Equipe ${equipe} • Hoje (${today})</b></div>
+      <div><b>Pendências de acesso</b></div>
+      <div class="small muted">Hoje: ${today}</div>
       <div class="divider"></div>
-      <div class="row"><div class="grow">Total ligações</div><div><b>${equipeTotalLig}</b></div></div>
-      <div class="row"><div class="grow">Atendidos</div><div><b>${equipeAtendidos}</b></div></div>
-      <div class="row"><div class="grow">Agendamentos</div><div><b>${equipeAg}</b></div></div>
-      <div class="row"><div class="grow">Promessas</div><div><b>${equipePr}</b></div></div>
-    </div>
-
-    <div class="card">
-      <div><b>Ranking (Equipe)</b></div>
-      <div class="small muted">Ordenado por Agendamentos → Atendidos → Ligações</div>
-      <div class="divider"></div>
-      ${rows.length ? rows.map((r,i)=>`
-        <div class="row">
-          <div class="grow">
-            <b>${i+1}º</b> ${escapeHtml(r.email)}
-            <div class="small muted">Ligações: ${r.lig} • Atendidos: ${r.at}</div>
+      ${pend.empty ? `<div class="center muted">Sem pendências.</div>` : pend.docs.map(d=>{
+        const u = d.data();
+        return `
+          <div class="row">
+            <div class="grow">
+              <b>${escapeHtml(u.email||d.id)}</b>
+              <div class="small muted">Equipe: ${escapeHtml(u.equipe||"")}</div>
+              <div class="small muted">Role: ${escapeHtml(u.role||"corretor")}</div>
+            </div>
+            <button class="btn btnGreen" style="width:auto; padding:10px 12px" onclick="aprovarUser('${d.id}')">Aprovar</button>
           </div>
-          <div class="pill">📅 ${r.ag}</div>
-          <div class="pill">📌 ${r.pr}</div>
-        </div>
-        ${i<rows.length-1?`<div class="divider"></div>`:""}
-      `).join("") : `<div class="center muted">Sem dados hoje.</div>`}
-    </div>
-  `;
-}
-
-async function renderTabAcessosGerente(){
-  const c = $("tabContent");
-  const equipe = currentUserDoc?.equipe || "equipe1";
-
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Aprovar acessos (Equipe ${equipe})</b></div>
-      <div class="small muted">Aparecem apenas usuários pendentes da sua equipe.</div>
-      <div class="divider"></div>
-      <div id="listaAcessos"></div>
-    </div>
-  `;
-
-  const snap = await db.collection("users")
-    .where("status","==","pendente")
-    .where("equipe","==",equipe)
-    .get();
-
-  const list = $("listaAcessos");
-  if(snap.empty){
-    list.innerHTML = `<div class="center muted">Sem pendências.</div>`;
-    return;
-  }
-
-  list.innerHTML = snap.docs.map(d=>{
-    const u = d.data();
-    return `
-      <div class="row">
-        <div class="grow">
-          <b>${escapeHtml(u.email || d.id)}</b>
-          <div class="small muted">Role solicitado: ${escapeHtml(u.role||"corretor")}</div>
-        </div>
-        <button class="btn btnGreen" style="width:auto; padding:10px 12px" onclick="aprovarUser('${d.id}')">Aprovar</button>
-      </div>
-      <div class="divider"></div>
-    `;
-  }).join("");
-}
-
-function renderTabConfigGerente(){
-  const c = $("tabContent");
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Configurações</b></div>
-      <div class="small muted">Ajustes futuros podem entrar aqui.</div>
+          <div class="divider"></div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -1592,199 +749,11 @@ function renderTabConfigGerente(){
 window.aprovarUser = async function(uid){
   await db.collection("users").doc(uid).update({ status:"aprovado", aprovadoEm: nowMs() });
   alert("Aprovado!");
-  if(currentRole==="gerente") await renderTabAcessosGerente();
-  if(currentRole==="diretor") await renderTabAcessosDiretor();
+  location.reload();
 };
 
 /** =========================
- *  DIRETOR UI (Lista geral + ranking gerentes/equipes + aprovar acessos)
- *  ========================= */
-function renderDiretorApp(user, userData){
-  currentRole = "diretor";
-  currentUserDoc = userData;
-
-  const el = $("app");
-  el.innerHTML = `
-    ${renderHeader(user.email, "diretor")}
-    <div id="tabContent"></div>
-    ${renderBottomNav(diretorTabs())}
-  `;
-
-  goTabDiretor(currentTab || "painel");
-}
-
-window.goTabDiretor = async function(tab){
-  currentTab = tab;
-  const user = auth.currentUser;
-  currentUserDoc = await getUserDoc(user.uid);
-
-  $("app").innerHTML = `
-    ${renderHeader(user.email, "diretor")}
-    <div id="tabContent"></div>
-    ${renderBottomNav(diretorTabs())}
-  `;
-
-  if(tab==="painel") return renderTabPainelDiretor();
-  if(tab==="resultados") return renderTabResultadosDiretor();
-  if(tab==="acessos") return renderTabAcessosDiretor();
-  if(tab==="config") return renderTabConfigDiretor();
-};
-
-function renderTabPainelDiretor(){
-  const c = $("tabContent");
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Upload • Lista Geral (Diretoria)</b></div>
-      <div class="small muted">Distribui ALEATORIAMENTE no upload para corretores ATIVOS.</div>
-      <div class="divider"></div>
-      <input type="file" id="fileDiretor" accept=".xls,.xlsx,.csv" />
-      <button class="btn btnGold" onclick="uploadListaGeral()">ENVIAR E DISTRIBUIR</button>
-    </div>
-  `;
-}
-
-window.uploadListaGeral = async function(){
-  const file = $("fileDiretor")?.files?.[0];
-  if(!file) return alert("Selecione um arquivo.");
-  try{
-    const user = auth.currentUser;
-    const me = currentUserDoc || await getUserDoc(user.uid);
-    if(!me || me.role !== "diretor") return alert("Apenas DIRETOR pode subir lista geral.");
-
-    const r = await uploadLeadsFromFile({
-      file, origem:"geral", equipe:null, donoUploadUid:user.uid, distribuirGeralAgora:true
-    });
-
-    alert(`Lista geral enviada! Total: ${r.total}. Distribuída para corretores ativos.`);
-    $("fileDiretor").value = "";
-  }catch(e){
-    alert(e.message);
-  }
-};
-
-async function renderTabResultadosDiretor(){
-  const c = $("tabContent");
-  const today = dayKey(nowMs());
-
-  // gerentes aprovados
-  const gerSnap = await db.collection("users")
-    .where("role","==","gerente")
-    .where("status","==","aprovado")
-    .get();
-
-  const gerentes = gerSnap.docs.map(d=>({ uid:d.id, ...d.data() }));
-
-  // monta por equipe
-  const equipes = {};
-  for(const g of gerentes){
-    const eq = g.equipe || "equipe1";
-    if(!equipes[eq]) equipes[eq] = { equipe:eq, ag:0, pr:0, at:0, lig:0, gerenteEmail:g.email||g.uid };
-  }
-
-  // percorre leads do dia e soma
-  const leadsSnap = await db.collection("leads").get();
-  leadsSnap.forEach(ds=>{
-    const d = ds.data();
-    const eq = d.equipe || "equipe1";
-    if(!equipes[eq]) equipes[eq] = { equipe:eq, ag:0, pr:0, at:0, lig:0, gerenteEmail:"-" };
-
-    if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao)===today) equipes[eq].lig++;
-    if(d.atendeu===true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao)===today){
-      equipes[eq].at++;
-      if(d.resultado==="AGENDAMENTO") equipes[eq].ag++;
-      if(d.resultado==="PROMESSA DOCUMENTAÇÃO") equipes[eq].pr++;
-    }
-  });
-
-  const rows = Object.values(equipes);
-  rows.sort((a,b)=> (b.ag-a.ag) || (b.at-a.at) || (b.lig-a.lig));
-
-  const total = rows.reduce((acc,r)=>({
-    lig: acc.lig+r.lig,
-    at: acc.at+r.at,
-    ag: acc.ag+r.ag,
-    pr: acc.pr+r.pr
-  }), {lig:0,at:0,ag:0,pr:0});
-
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Geral • Hoje (${today})</b></div>
-      <div class="divider"></div>
-      <div class="row"><div class="grow">Total ligações</div><div><b>${total.lig}</b></div></div>
-      <div class="row"><div class="grow">Atendidos</div><div><b>${total.at}</b></div></div>
-      <div class="row"><div class="grow">Agendamentos</div><div><b>${total.ag}</b></div></div>
-      <div class="row"><div class="grow">Promessas</div><div><b>${total.pr}</b></div></div>
-    </div>
-
-    <div class="card">
-      <div><b>Ranking • Equipes/Gerentes</b></div>
-      <div class="small muted">Ordenado por Agendamentos → Atendidos → Ligações</div>
-      <div class="divider"></div>
-      ${rows.length ? rows.map((r,i)=>`
-        <div class="row">
-          <div class="grow">
-            <b>${i+1}º</b> Equipe <b>${escapeHtml(r.equipe)}</b>
-            <div class="small muted">Ligações: ${r.lig} • Atendidos: ${r.at}</div>
-            <div class="small muted">Gerente: ${escapeHtml(r.gerenteEmail||"-")}</div>
-          </div>
-          <div class="pill">📅 ${r.ag}</div>
-          <div class="pill">📌 ${r.pr}</div>
-        </div>
-        ${i<rows.length-1?`<div class="divider"></div>`:""}
-      `).join("") : `<div class="center muted">Sem dados hoje.</div>`}
-    </div>
-  `;
-}
-
-async function renderTabAcessosDiretor(){
-  const c = $("tabContent");
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Aprovar acessos (Geral)</b></div>
-      <div class="small muted">Aparecem todos os usuários pendentes.</div>
-      <div class="divider"></div>
-      <div id="listaAcessosDiretor"></div>
-    </div>
-  `;
-
-  const snap = await db.collection("users")
-    .where("status","==","pendente")
-    .get();
-
-  const list = $("listaAcessosDiretor");
-  if(snap.empty){
-    list.innerHTML = `<div class="center muted">Sem pendências.</div>`;
-    return;
-  }
-
-  list.innerHTML = snap.docs.map(d=>{
-    const u = d.data();
-    return `
-      <div class="row">
-        <div class="grow">
-          <b>${escapeHtml(u.email || d.id)}</b>
-          <div class="small muted">Equipe: ${escapeHtml(u.equipe||"")}</div>
-          <div class="small muted">Role: ${escapeHtml(u.role||"corretor")}</div>
-        </div>
-        <button class="btn btnGreen" style="width:auto; padding:10px 12px" onclick="aprovarUser('${d.id}')">Aprovar</button>
-      </div>
-      <div class="divider"></div>
-    `;
-  }).join("");
-}
-
-function renderTabConfigDiretor(){
-  const c = $("tabContent");
-  c.innerHTML = `
-    <div class="card">
-      <div><b>Configurações</b></div>
-      <div class="small muted">Ajustes futuros podem entrar aqui.</div>
-    </div>
-  `;
-}
-
-/** =========================
- *  Bootstrap (Auth)
+ *  Bootstrap
  *  ========================= */
 auth.onAuthStateChanged(async (user)=>{
   if(!user){
@@ -1798,17 +767,25 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
 
+  // 1) tenta corrigir automaticamente se for email diretor
+  try{
+    await ensureDirectorForCurrentUser();
+  }catch(e){
+    // se falhar, continua
+  }
+
+  // 2) lê users/{uid}
   const userSnap = await db.collection("users").doc(user.uid).get();
   if(!userSnap.exists){
-    renderUnauthorized("Usuário não autorizado (cadastro não encontrado em users).");
+    renderPendingOrUnauthorized(user, { status:"pendente" });
     return;
   }
 
   const data = userSnap.data();
 
-  // Bloqueia pendente
+  // 3) bloqueia pendente
   if(data.status !== "aprovado"){
-    renderUnauthorized("Acesso pendente. Aguarde aprovação do gestor/diretor.");
+    renderPendingOrUnauthorized(user, data);
     return;
   }
 
