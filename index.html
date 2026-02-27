@@ -164,13 +164,35 @@ let detailsOpen    = false;  // painel de "ATENDEU" aberto
  *  Helpers
  *  ========================= */
 function $(id){ return document.getElementById(id); }
-
 function nowMs(){ return Date.now(); }
+function cleanPhone(raw){ return String(raw || "").replace(/\D/g,''); }
 
-function cleanPhone(raw){
-  return String(raw || "").replace(/\D/g,'');
+function templateMessage(msg, lead){
+  const nome = lead?.nome || "";
+  const tel  = lead?.telefone || "";
+  const em   = lead?.email || "";
+  return String(msg || "")
+    .replaceAll("{{nome}}", nome)
+    .replaceAll("{{telefone}}", tel)
+    .replaceAll("{{email}}", em);
 }
 
+function dayKey(ts){
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const da = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${da}`;
+}
+
+async function getUserDoc(uid){
+  const snap = await db.collection("users").doc(uid).get();
+  return snap.exists ? snap.data() : null;
+}
+
+/** =========================
+ *  Login UI
+ *  ========================= */
 function renderLogin(){
   const el = $("app");
   el.innerHTML = `
@@ -220,34 +242,6 @@ function renderUnauthorized(){
   `;
 }
 
-function templateMessage(msg, lead){
-  const nome = lead?.nome || "";
-  const tel  = lead?.telefone || "";
-  const em   = lead?.email || "";
-  return String(msg || "")
-    .replaceAll("{{nome}}", nome)
-    .replaceAll("{{telefone}}", tel)
-    .replaceAll("{{email}}", em);
-}
-
-function formatMin(ms){
-  const m = Math.floor(ms/60000);
-  return m;
-}
-
-function dayKey(ts){
-  const d = new Date(ts);
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const da = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${da}`;
-}
-
-async function getUserDoc(uid){
-  const snap = await db.collection("users").doc(uid).get();
-  return snap.exists ? snap.data() : null;
-}
-
 /** =========================
  *  Active status (corretor)
  *  ========================= */
@@ -267,29 +261,24 @@ function activeBadge(ativo){
  *  Upload & Import (XLS/XLSX/CSV)
  *  ========================= */
 function parseSheetRows(workbook){
-  // pega a primeira aba
   const sheetName = workbook.SheetNames[0];
   const ws = workbook.Sheets[sheetName];
-  // como array de arrays
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
-  // remove linhas vazias
   const clean = rows.filter(r => r && r.some(cell => String(cell).trim() !== ""));
   return clean;
 }
 
 function detectHeaderRow(rows){
-  // tenta achar cabeçalho por palavras chave nas primeiras 5 linhas
   const keys = ["nome","telefone","celular","contato","email","e-mail"];
   for(let i=0;i<Math.min(5, rows.length);i++){
     const row = rows[i].map(c=>String(c).toLowerCase().trim());
     const hit = row.some(c => keys.includes(c));
     if(hit) return i;
   }
-  return 0; // assume primeira linha como dados se não achar
+  return 0;
 }
 
 function mapLeadColumns(row){
-  // Esperado: A=Nome, B=Telefone, C=Email
   const nome = String(row[0] || "").trim();
   const telefone = String(row[1] || "").trim();
   const email = String(row[2] || "").trim();
@@ -302,27 +291,21 @@ function makeLeadDoc(base){
     telefone: base.telefone || "",
     email: base.email || "",
     status: "fila",
-    // controle
     corretorId: null,
-    // auditoria
     criadoEm: nowMs(),
     atualizadoEm: nowMs(),
-    // atendimento
     emAtendimentoEm: null,
     timestampDistribuicao: null,
     timestampFinalizacao: null,
-    // resultado
     atendeu: null,
     resultado: null,
     observacao: null,
     dataAgendada: null,
-    // contabilização de chamadas
     totalTentativas: 0,
-    // escopo
     origem: null,        // geral | gerente | corretor
     equipe: null,        // string
     donoUpload: null,    // uid
-    listaRef: null       // id da lista (para auditoria)
+    listaRef: null       // id da lista
   };
 }
 
@@ -339,12 +322,11 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
   for(const r of dataRows){
     const lead = mapLeadColumns(r);
     if(!lead.nome && !lead.telefone && !lead.email) continue;
-    if(!lead.telefone) continue; // telefone é chave operacional
+    if(!lead.telefone) continue;
     parsed.push(lead);
   }
   if(parsed.length === 0) throw new Error("Nenhum lead válido (verifique colunas A/B/C).");
 
-  // cria um "registro de lista" para auditoria
   const listaDoc = await db.collection("listas").add({
     origem,
     equipe: equipe || null,
@@ -355,7 +337,6 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
   });
   const listaRefId = listaDoc.id;
 
-  // Se for lista geral e distribuir no upload: precisamos da lista de corretores ativos
   let corretoresAtivos = [];
   if(origem === "geral" && distribuirGeralAgora){
     const snap = await db.collection("users")
@@ -368,13 +349,13 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
     }
   }
 
-  // grava em lote (batch) para performance
-  const batchSize = 400; // limite conservador para batch
+  const batchSize = 400;
   let idx = 0;
 
   while(idx < parsed.length){
     const batch = db.batch();
     const slice = parsed.slice(idx, idx + batchSize);
+
     for(const leadBase of slice){
       const docRef = db.collection("leads").doc();
       const doc = makeLeadDoc(leadBase);
@@ -384,15 +365,15 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
       doc.donoUpload = donoUploadUid;
       doc.listaRef = listaRefId;
 
-      // distribuição no upload apenas para origem geral
       if(origem === "geral" && distribuirGeralAgora){
         const chosen = corretoresAtivos[Math.floor(Math.random() * corretoresAtivos.length)];
-        doc.corretorId = chosen.uid;           // já nasce atribuído
-        doc.status = "fila";                  // continua fila, mas "fila do corretor"
+        doc.corretorId = chosen.uid;
+        doc.status = "fila";
       }
 
       batch.set(docRef, doc);
     }
+
     await batch.commit();
     idx += batchSize;
   }
@@ -404,14 +385,6 @@ async function uploadLeadsFromFile({ file, origem, equipe, donoUploadUid, distri
  *  Lead selection per source
  *  ========================= */
 async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
-  // source: geral | gerente | minha
-  // regras:
-  // - geral: origem=geral AND corretorId == meuUid AND status==fila
-  // - gerente: origem=gerente AND equipe == minhaEquipe AND status==fila AND (corretorId==null ou corretorId==meuUid?) -> vamos usar "corretorId == null" pra evitar conflito
-  // - minha: origem=corretor AND donoUpload==meuUid AND status==fila
-  //
-  // Ao pegar: seta status=em atendimento e marca timestamps
-
   let q = db.collection("leads").where("status","==","fila");
 
   if(source === "geral"){
@@ -422,21 +395,18 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
-  // pega 1 qualquer. (poderíamos ordenar por criadoEm)
   const snap = await q.limit(1).get();
   if(snap.empty) return null;
 
   const docSnap = snap.docs[0];
   const ref = docSnap.ref;
 
-  // travar para esse corretor e começar atendimento
   await ref.update({
     status: "em atendimento",
     corretorId: corretorUid,
     emAtendimentoEm: nowMs(),
     timestampDistribuicao: nowMs(),
     atualizadoEm: nowMs(),
-    // contabiliza tentativa no momento que pegou
     totalTentativas: firebase.firestore.FieldValue.increment(1)
   });
 
@@ -445,7 +415,7 @@ async function pickNextLeadForCorretor({ source, corretorUid, equipeCorretor }){
 }
 
 /** =========================
- *  UI - Diretor / Gerente / Corretor
+ *  UI - Header
  *  ========================= */
 function renderHeader(userEmail, role, extraHtml=""){
   return `
@@ -467,6 +437,9 @@ function renderHeader(userEmail, role, extraHtml=""){
   `;
 }
 
+/** =========================
+ *  Director / Manager / Broker screens
+ *  ========================= */
 function renderDiretor(user, userData){
   const el = $("app");
   el.innerHTML = `
@@ -498,7 +471,7 @@ function renderGerente(user, userData){
 
     <div class="card">
       <div><b>Gerente • Email para relatórios</b></div>
-      <div class="small muted">Será usado para o corretor enviar o relatório do Excel (abrirá email pronto).</div>
+      <div class="small muted">Usado para o corretor enviar o relatório (email pronto).</div>
       <div class="divider"></div>
       <input id="emailRelatorio" placeholder="Email do gerente (relatórios)" value="${userData?.emailRelatorio || ""}" />
       <button class="btn btnBlue" onclick="salvarEmailRelatorio()">SALVAR EMAIL</button>
@@ -509,14 +482,12 @@ function renderGerente(user, userData){
 function renderCorretor(user, userData){
   const equipe = userData?.equipe || "equipe1";
   const ativo  = !!userData?.ativo;
-  const badge  = activeBadge(ativo);
 
-  // registra login timestamp p/ relatório
   loginTimestamp = nowMs();
 
   const el = $("app");
   el.innerHTML = `
-    ${renderHeader(user.email, "corretor", `<div>${badge}</div>`)}
+    ${renderHeader(user.email, "corretor", `<div>${activeBadge(ativo)}</div>`)}
     
     <div class="card">
       <div class="row">
@@ -551,12 +522,8 @@ function renderCorretor(user, userData){
     </div>
 
     <div class="card">
-      <div class="row">
-        <div class="grow">
-          <div><b>Mensagem Padrão (WhatsApp/SMS/Email)</b></div>
-          <div class="small muted">Use: {{nome}} {{telefone}} {{email}}</div>
-        </div>
-      </div>
+      <div><b>Mensagem Padrão (WhatsApp/SMS/Email)</b></div>
+      <div class="small muted">Use: {{nome}} {{telefone}} {{email}}</div>
       <div class="divider"></div>
       <textarea id="msgPadrao" placeholder="Digite sua mensagem padrão...">${userData?.mensagemPadrao || "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse."}</textarea>
       <button class="btn btnBlue" onclick="salvarMensagemPadrao()">SALVAR MENSAGEM</button>
@@ -572,17 +539,16 @@ function renderCorretor(user, userData){
 
     <div class="card">
       <div><b>Relatório do Operador</b></div>
-      <div class="small muted">Gera Excel (Resumo + Atendidos). O total de ligações inclui "não atendeu".</div>
+      <div class="small muted">Gera Excel (Resumo + Atendidos). Total de ligações inclui "não atendeu".</div>
       <div class="divider"></div>
       <button class="btn btnGold" onclick="gerarRelatorioExcel()">📊 GERAR RELATÓRIO (EXCEL)</button>
       <button class="btn btnGhost" onclick="prepararEmailRelatorio()">✉️ ENVIAR RELATÓRIO (EMAIL)</button>
-      <div class="small muted">O botão EMAIL abre o app de email com destinatário do gerente da sua equipe.</div>
     </div>
   `;
 }
 
 /** =========================
- *  Actions - Diretor/Gerente/Corretor
+ *  Actions
  *  ========================= */
 window.uploadListaGeral = async function(){
   const file = $("fileDiretor")?.files?.[0];
@@ -592,11 +558,7 @@ window.uploadListaGeral = async function(){
     const me = await getUserDoc(user.uid);
     if(!me || me.role !== "diretor") return alert("Apenas DIRETOR pode subir lista geral.");
     const r = await uploadLeadsFromFile({
-      file,
-      origem: "geral",
-      equipe: null,
-      donoUploadUid: user.uid,
-      distribuirGeralAgora: true
+      file, origem:"geral", equipe:null, donoUploadUid:user.uid, distribuirGeralAgora:true
     });
     alert(`Lista geral enviada! Total: ${r.total}. Distribuída para corretores ativos.`);
     $("fileDiretor").value = "";
@@ -614,11 +576,7 @@ window.uploadListaGerente = async function(){
     if(!me || me.role !== "gerente") return alert("Apenas GERENTE pode subir esta lista.");
     const equipe = me.equipe || "equipe1";
     const r = await uploadLeadsFromFile({
-      file,
-      origem: "gerente",
-      equipe,
-      donoUploadUid: user.uid,
-      distribuirGeralAgora: false
+      file, origem:"gerente", equipe, donoUploadUid:user.uid, distribuirGeralAgora:false
     });
     alert(`Lista da equipe enviada! Total: ${r.total}.`);
     $("fileGerente").value = "";
@@ -636,11 +594,7 @@ window.uploadListaCorretor = async function(){
     if(!me || me.role !== "corretor") return alert("Apenas CORRETOR pode subir lista própria.");
     const equipe = me.equipe || "equipe1";
     const r = await uploadLeadsFromFile({
-      file,
-      origem: "corretor",
-      equipe,
-      donoUploadUid: user.uid,
-      distribuirGeralAgora: false
+      file, origem:"corretor", equipe, donoUploadUid:user.uid, distribuirGeralAgora:false
     });
     alert(`Sua lista foi enviada! Total: ${r.total}.`);
     $("fileCorretor").value = "";
@@ -660,7 +614,6 @@ window.salvarEmailRelatorio = async function(){
 window.setMeActive = async function(ativo){
   const user = auth.currentUser;
   await setActiveStatus(user.uid, ativo);
-  // re-render
   const me = await getUserDoc(user.uid);
   renderCorretor(user, me);
 };
@@ -680,9 +633,7 @@ window.pegarProximoLead = async function(){
   const equipe = me.equipe || "equipe1";
 
   const picked = await pickNextLeadForCorretor({
-    source,
-    corretorUid: user.uid,
-    equipeCorretor: equipe
+    source, corretorUid: user.uid, equipeCorretor: equipe
   });
 
   if(!picked){
@@ -693,15 +644,26 @@ window.pegarProximoLead = async function(){
   leadAtualRef = picked.ref;
   leadAtualData = picked.data;
   detailsOpen = false;
-  renderLeadInArea(me);
+
+  // ✅ CORREÇÃO: agora renderiza o lead já buscando a mensagem atualizada do Firestore
+  await renderLeadInArea();
 };
 
-function renderLeadInArea(me){
+/** =========================
+ *  ✅ CORREÇÃO PRINCIPAL AQUI:
+ *  renderLeadInArea agora sempre busca mensagemPadrao atualizada no Firestore
+ *  ========================= */
+async function renderLeadInArea(){
   const lead = leadAtualData;
   const area = $("leadArea");
 
+  // Busca atualizada do usuário
+  const user = auth.currentUser;
+  const snap = await db.collection("users").doc(user.uid).get();
+  const userAtual = snap.exists ? (snap.data() || {}) : {};
+
   const telClean = cleanPhone(lead.telefone);
-  const msgBase  = me?.mensagemPadrao || "";
+  const msgBase  = userAtual.mensagemPadrao || "";
   const msgFinal = encodeURIComponent(templateMessage(msgBase, lead));
 
   area.innerHTML = `
@@ -710,8 +672,14 @@ function renderLeadInArea(me){
     <div class="divider"></div>
 
     <div class="grid3">
-      <a href="tel:${telClean}"><button class="btn btnBlue">📞 LIGAR</button></a>
-      <a href="sms:${telClean}?body=${msgFinal}"><button class="btn btnBlue">📩 SMS</button></a>
+      <a href="tel:${telClean}">
+        <button class="btn btnBlue">📞 LIGAR</button>
+      </a>
+
+      <a href="sms:${telClean}?body=${msgFinal}">
+        <button class="btn btnBlue">📩 SMS</button>
+      </a>
+
       <a href="mailto:${encodeURIComponent(lead.email || "")}?subject=${encodeURIComponent("PROEFI - ALVENA")}&body=${msgFinal}">
         <button class="btn btnBlue">📧 EMAIL</button>
       </a>
@@ -735,18 +703,8 @@ function renderLeadInArea(me){
 window.uiNaoAtendeu = async function(){
   if(!leadAtualRef) return;
 
-  // devolve para fila (mantém contador de tentativas já incrementado quando pegou)
   await leadAtualRef.update({
     status: "fila",
-    // libera para redistribuição conforme a origem:
-    // - geral: continua atribuída ao corretorId (para ele mesmo tentar depois) OU pode liberar (null).
-    // Você pediu voltar pra distribuição: para geral, vamos liberar (null) para rodar de novo em algum momento?
-    // Mas a lista geral já foi distribuída no upload. Então voltar pra fila DESTE corretor pode ser melhor.
-    // Como você quer redistribuição, vamos:
-    // - se origem geral: zera corretorId para voltar a "pool" geral? Isso conflita com modelo distribuído no upload.
-    // Então faremos:
-    // origem geral: mantém corretorId do próprio corretor (fila dele).
-    // origem gerente/corretor: volta para fila da origem (corretorId null).
     corretorId: (leadAtualData.origem === "geral") ? auth.currentUser.uid : null,
     emAtendimentoEm: null,
     timestampDistribuicao: null,
@@ -859,14 +817,12 @@ window.gerarRelatorioExcel = async function(){
   const me = await getUserDoc(user.uid);
   if(!me || me.role !== "corretor") return;
 
-  const start = dayKey(nowMs()); // chave do dia, usamos filtro por criadoEm? (sem índice)
-  // Para simplificar sem indexes compostos: puxamos os leads do corretor e filtramos no cliente pelo dia de finalização.
   const snap = await db.collection("leads").where("corretorId","==",user.uid).get();
   if(snap.empty) return alert("Sem registros para relatório.");
 
   const today = dayKey(nowMs());
 
-  let totalLigacoes = 0;      // inclui não atendeu
+  let totalLigacoes = 0;
   let totalNaoAtendeu = 0;
   let totalAtendidos = 0;
   let totalAgend = 0;
@@ -877,39 +833,33 @@ window.gerarRelatorioExcel = async function(){
 
   snap.forEach(ds=>{
     const d = ds.data();
-    // contabilização: totalTentativas já marca quantas vezes ele pegou o lead
-    // aqui somamos tentativas do dia pelo critério de timestampDistribuicao do dia (aproximação simples)
-    // se não existir timestampDistribuicao, pula.
-    if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today){
-      totalLigacoes += 1; // 1 tentativa por "pegar lead" (como definimos)
-    }
 
+    if(d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today){
+      totalLigacoes += 1;
+    }
     if(d.atendeu === false && d.timestampDistribuicao && dayKey(d.timestampDistribuicao) === today){
       totalNaoAtendeu += 1;
     }
 
-    if(d.atendeu === true){
-      // filtra por finalização do dia
-      if(d.timestampFinalizacao && dayKey(d.timestampFinalizacao) === today){
-        totalAtendidos += 1;
-        if(d.resultado === "AGENDAMENTO") totalAgend += 1;
-        else if(d.resultado === "PROMESSA DOCUMENTAÇÃO") totalPromessa += 1;
-        else if(d.resultado === "NÃO GEROU INTERESSE") totalSemInteresse += 1;
+    if(d.atendeu === true && d.timestampFinalizacao && dayKey(d.timestampFinalizacao) === today){
+      totalAtendidos += 1;
+      if(d.resultado === "AGENDAMENTO") totalAgend += 1;
+      else if(d.resultado === "PROMESSA DOCUMENTAÇÃO") totalPromessa += 1;
+      else if(d.resultado === "NÃO GEROU INTERESSE") totalSemInteresse += 1;
 
-        const tempoMin = (d.timestampFinalizacao && d.timestampDistribuicao)
-          ? Math.max(0, Math.floor((d.timestampFinalizacao - d.timestampDistribuicao)/60000))
-          : "";
+      const tempoMin = (d.timestampFinalizacao && d.timestampDistribuicao)
+        ? Math.max(0, Math.floor((d.timestampFinalizacao - d.timestampDistribuicao)/60000))
+        : "";
 
-        atendidosRows.push({
-          Cliente: d.nome || "",
-          Telefone: d.telefone || "",
-          Email: d.email || "",
-          Resultado: d.resultado || "",
-          "Data/Hora Agendada": d.dataAgendada || "",
-          Feedback: d.observacao || "",
-          "Tempo Atendimento (min)": tempoMin
-        });
-      }
+      atendidosRows.push({
+        Cliente: d.nome || "",
+        Telefone: d.telefone || "",
+        Email: d.email || "",
+        Resultado: d.resultado || "",
+        "Data/Hora Agendada": d.dataAgendada || "",
+        Feedback: d.observacao || "",
+        "Tempo Atendimento (min)": tempoMin
+      });
     }
   });
 
@@ -944,7 +894,6 @@ window.prepararEmailRelatorio = async function(){
   const me = await getUserDoc(user.uid);
   if(!me || me.role !== "corretor") return;
 
-  // pega gerente da equipe para email
   const equipe = me.equipe || "equipe1";
   const gsnap = await db.collection("users")
     .where("role","==","gerente")
@@ -979,12 +928,11 @@ Att,
 PROEFI - ALVENA`
   );
 
-  // abre app de email
   window.location.href = `mailto:${encodeURIComponent(to)}?subject=${subject}&body=${body}`;
 };
 
 /** =========================
- *  Auth bootstrap
+ *  Bootstrap
  *  ========================= */
 auth.onAuthStateChanged(async (user)=>{
   if(!user){
