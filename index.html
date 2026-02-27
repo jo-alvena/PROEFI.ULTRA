@@ -7,6 +7,13 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    button { padding: 10px; margin: 5px 0; width: 100%; }
+    h2 { margin-bottom: 5px; }
+    #leadAtual { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; }
+  </style>
 </head>
 <body>
 
@@ -120,13 +127,38 @@ window.pegarLead = async function () {
 
 function mostrarLead(id, data) {
 
+  const telefoneLimpo = data.telefone.replace(/\D/g, '');
+  const mensagem = encodeURIComponent(
+    `Olá ${data.nome}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.`
+  );
+
   const div = document.getElementById("leadAtual");
 
   div.innerHTML = `
     <h3>${data.nome}</h3>
     <p>Telefone: ${data.telefone}</p>
     <p>Email: ${data.email}</p>
+
+    <a href="tel:${telefoneLimpo}">
+      <button>📞 LIGAR</button>
+    </a>
+
+    <a href="https://wa.me/55${telefoneLimpo}?text=${mensagem}" target="_blank">
+      <button>💬 WHATSAPP</button>
+    </a>
+
+    <a href="mailto:${data.email}?subject=Contato%20Alvena&body=${mensagem}">
+      <button>📧 EMAIL</button>
+    </a>
+
+    <a href="sms:${telefoneLimpo}?body=${mensagem}">
+      <button>📩 SMS</button>
+    </a>
+
+    <br>
+
     <p id="contador"></p>
+
     <button onclick="finalizarLead('${id}', 'atendeu')">ATENDEU</button>
     <button onclick="finalizarLead('${id}', 'nao_atendeu')">NÃO ATENDEU</button>
   `;
