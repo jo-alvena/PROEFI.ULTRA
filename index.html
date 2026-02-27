@@ -35,7 +35,7 @@ auth.onAuthStateChanged(async (user) => {
       return;
     }
 
-    const tipo = doc.data().tipo;
+    const tipo = doc.data().role;
 
     if (tipo === "gerente") {
       mostrarGerente(user.email);
@@ -160,4 +160,5 @@ function iniciarTimer(id) {
 }
 </script>
 </body>
+
 </html>
