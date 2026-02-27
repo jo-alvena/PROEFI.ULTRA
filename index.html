@@ -12,7 +12,7 @@
 <style>
 body{
   margin:0;
-  font-family: 'Century Gothic', Arial;
+  font-family:'Century Gothic',Arial;
   background:#21346C;
   color:#FFFFFF;
   padding:20px;
@@ -49,13 +49,25 @@ button{
   border-radius:8px;
   font-size:16px;
   font-weight:bold;
+  cursor:pointer;
 }
 
+/* CORES */
 .btn-primario{background:#BC8A0B;color:#FFFFFF;}
 .btn-verde{background:#A5D6A7;color:#21346C;}
 .btn-vermelho{background:#EF9A9A;color:#21346C;}
 .btn-azul{background:#21346C;color:#FFFFFF;}
-.btn-neutro{background:#BC8A0B;color:#FFFFFF;}
+.btn-outline{
+  background:#FFFFFF;
+  color:#21346C;
+  border:2px solid #21346C;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
 
 a{text-decoration:none;}
 </style>
@@ -67,12 +79,9 @@ a{text-decoration:none;}
 <script>
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
-  authDomain: "proefi-alvena.firebaseapp.com",
-  projectId: "proefi-alvena",
-  storageBucket: "proefi-alvena.firebasestorage.app",
-  messagingSenderId: "1084612497727",
-  appId: "1:1084612497727:web:d9b1de2962cce8123b038a"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_AUTH_DOMAIN",
+  projectId: "SEU_PROJECT_ID",
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -101,10 +110,10 @@ function mostrarLogin(){
 }
 
 function login(){
-  const email=document.getElementById("email").value;
-  const senha=document.getElementById("senha").value;
-  auth.signInWithEmailAndPassword(email,senha)
-  .catch(e=>alert(e.message));
+  auth.signInWithEmailAndPassword(
+    document.getElementById("email").value,
+    document.getElementById("senha").value
+  ).catch(e=>alert(e.message));
 }
 
 function logout(){auth.signOut();}
@@ -113,7 +122,7 @@ function mostrarGerente(email){
   app.innerHTML=`
     <h2>PROEFI - GERENTE</h2>
     <p>${email}</p>
-    <button class="btn-neutro" onclick="logout()">Sair</button>
+    <button class="btn-primario" onclick="logout()">Sair</button>
   `;
 }
 
@@ -123,7 +132,7 @@ function mostrarCorretor(email){
     <p>${email}</p>
     <button class="btn-primario" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
     <div id="leadAtual"></div>
-    <button class="btn-neutro" onclick="logout()">Sair</button>
+    <button class="btn-outline" onclick="logout()">Sair</button>
   `;
 }
 
@@ -155,10 +164,19 @@ function mostrarLead(id,data){
     <p><strong>Telefone:</strong> ${data.telefone}</p>
     <p><strong>Email:</strong> ${data.email}</p>
 
-    <a href="tel:${telefone}"><button class="btn-azul">📞 LIGAR</button></a>
-    <a href="https://wa.me/55${telefone}?text=${mensagem}" target="_blank">
-      <button class="btn-azul">💬 WHATSAPP</button>
-    </a>
+    <div class="grid">
+      <a href="tel:${telefone}">
+        <button class="btn-azul">📞 LIGAR</button>
+      </a>
+
+      <a href="sms:${telefone}">
+        <button class="btn-azul">📩 SMS</button>
+      </a>
+
+      <a href="https://wa.me/55${telefone}?text=${mensagem}" target="_blank">
+        <button class="btn-azul">💬 WHATSAPP</button>
+      </a>
+    </div>
 
     <textarea id="obs" placeholder="Observação"></textarea>
 
@@ -172,7 +190,7 @@ function mostrarLead(id,data){
       NÃO ATENDEU
     </button>
 
-    <button class="btn-primario" onclick="abrirAgendamento()">
+    <button class="btn-primario" onclick="abrirAgendamento('${id}')">
       📅 AGENDAMENTO
     </button>
 
@@ -187,30 +205,32 @@ function mostrarLead(id,data){
   iniciarTimer(id);
 }
 
-function abrirAgendamento(){
-  document.getElementById("dataHora").style.display="block";
+function abrirAgendamento(id){
+  const campo=document.getElementById("dataHora");
+  campo.style.display="block";
+  campo.focus();
+  campo.onchange=function(){
+    finalizarLead(id,'agendamento');
+  };
 }
 
 window.finalizarLead=async function(id,resultado){
 
-  const observacao=document.getElementById("obs").value;
+  const obs=document.getElementById("obs").value;
   const dataHora=document.getElementById("dataHora").value;
 
-  if(resultado==="atendeu"||resultado==="nao_atendeu"){
-    await salvar(id,resultado,observacao,null);
+  if(resultado==="agendamento" && !dataHora){
+    alert("Selecione data e hora.");
+    return;
   }
-  else if(resultado==="promessa_documentacao"){
-    await salvar(id,resultado,observacao,null);
-  }
-}
 
-async function salvar(id,resultado,obs,dataHora){
   await db.collection("leads").doc(id).update({
     status:"finalizado",
     resultado:resultado,
     observacao:obs,
     dataAgendada:dataHora||null
   });
+
   document.getElementById("leadAtual").innerHTML="";
 }
 
