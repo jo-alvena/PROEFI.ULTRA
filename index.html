@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PROEFI - ALVENA (Enterprise)</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PROEFI - ALVENA ENTERPRISE</title>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -12,64 +12,34 @@
 
 <style>
 :root{
-  --blue:#21346C;
-  --gold:#BC8A0B;
-  --bg:#f4f6fb;
-  --ok:#b9f6ca;
-  --no:#ffcdd2;
+ --blue:#21346C;
+ --gold:#BC8A0B;
+ --green:#B9F6CA;
+ --red:#FFCCCB;
+ --white:#fff;
 }
-*{box-sizing:border-box}
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#1f2a44}
-.header{background:var(--blue);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
-.container{max-width:980px;margin:0 auto;padding:12px}
-.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-h1,h2,h3{margin:6px 0 10px}
-input,select,textarea,button{font-size:16px}
-input,select,textarea{width:100%;padding:10px;border:1px solid #d6d9e3;border-radius:10px}
-textarea{min-height:90px}
-.btn{border:none;border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer}
-.btn-primary{background:var(--gold);color:#fff}
-.btn-secondary{background:var(--blue);color:#fff}
-.btn-ok{background:var(--ok)}
-.btn-no{background:var(--no)}
-.row{display:grid;gap:8px}
-.row-2{grid-template-columns:1fr 1fr}
-.row-3{grid-template-columns:1fr 1fr 1fr}
+body{margin:0;font-family:Arial;background:var(--blue);color:#fff}
+.wrap{max-width:520px;margin:auto;padding:14px}
+.card{background:#fff;color:#21346C;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+h1{color:var(--gold);margin:0;text-align:center}
+.sub{text-align:center;margin-bottom:12px}
+input,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #ccc}
+.btn{width:100%;padding:14px;border:none;border-radius:12px;font-weight:700;margin-top:8px}
+.btnBlue{background:var(--blue);color:#fff}
+.btnGold{background:var(--gold);color:#fff}
+.btnGreen{background:var(--green)}
+.btnRed{background:var(--red)}
+.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;display:flex;gap:6px;padding:8px}
+.tab{flex:1;text-align:center;padding:12px;background:#eef2ff;border-radius:10px;font-weight:700;color:#21346C}
 .small{font-size:12px;opacity:.8}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef2ff;font-size:12px}
-.tabs{
- position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #e5e7ef;
- display:flex;justify-content:space-around;gap:6px;padding:10px 8px;z-index:10
-}
-.tab{flex:1;text-align:center;padding:10px 6px;border-radius:10px;font-weight:700;color:#21346C;background:#f2f4fa}
-.tab.active{background:#e6ecff}
-.spacer{height:76px}
-.table-wrap{overflow:auto}
-table{width:100%;border-collapse:collapse}
-th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
-.hidden{display:none}
 </style>
 </head>
+
 <body>
-<div class="header">
-  <div style="max-width:980px;margin:0 auto;">
-    <strong>PROEFI - ALVENA</strong>
-    <div class="small">Produção Eficiente · Alvena Soluções Imobiliária</div>
-  </div>
-</div>
-
-<div class="container" id="app">Carregando...</div>
-<div class="spacer"></div>
-
-<div class="tabs hidden" id="tabs">
-  <div class="tab active" data-tab="painel">Painel</div>
-  <div class="tab" data-tab="atendimento">Atendimento</div>
-  <div class="tab" data-tab="mini">Mini CRM</div>
-  <div class="tab" data-tab="resultados">Resultados</div>
-  <div class="tab" data-tab="config">Config</div>
-</div>
+<div class="wrap" id="app">Carregando...</div>
 
 <script>
+/* ================= FIREBASE ================= */
 const firebaseConfig = {
   apiKey: "AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
   authDomain: "proefi-alvena.firebaseapp.com",
@@ -83,376 +53,164 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-const state = {
-  user:null,
-  profile:null,
-  currentTab:'painel',
-  lead:null,
-  leadRef:null,
-  loginAt:null,
-};
+/* ================= STATE ================= */
+let userData=null;
+let leadAtual=null;
+let focoExtremo=true;
+let ultimaAcao=Date.now();
 
-const moneySound = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
-
+/* ================= HELPERS ================= */
 function $(id){return document.getElementById(id);}
-function fmtTime(ms){
-  const s=Math.floor(ms/1000); const m=Math.floor(s/60); const r=s%60;
-  return `${m}m ${r}s`;
+function now(){return Date.now();}
+function beep(){
+  const a=new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+  a.play().catch(()=>{});
 }
-function safePlay(){ try{ moneySound.currentTime=0; moneySound.play(); }catch(e){} }
 
-function showLogin(){
-  $("tabs").classList.add("hidden");
-  $("app").innerHTML = `
-  <div class="card">
-    <h2>Entrar</h2>
-    <div class="row">
-      <input id="email" placeholder="Email"/>
-      <input id="senha" type="password" placeholder="Senha"/>
-      <button class="btn btn-primary" onclick="login()">Entrar</button>
-      <button class="btn btn-secondary" onclick="register()">Criar acesso</button>
-      <div class="small">Novos acessos ficam pendentes até aprovação.</div>
-    </div>
-  </div>`;
+/* ================= LOGIN ================= */
+function renderLogin(){
+ app.innerHTML=`
+ <h1>PROEFI - ALVENA</h1>
+ <div class="sub">Produção Eficiente • Alvena Soluções Imobiliárias</div>
+ <div class="card">
+   <input id="email" placeholder="Email">
+   <input id="senha" type="password" placeholder="Senha">
+   <button class="btn btnGold" onclick="login()">ENTRAR</button>
+   <button class="btn btnBlue" onclick="criarConta()">CRIAR ACESSO</button>
+ </div>`;
 }
 
 async function login(){
-  try{
-    await auth.signInWithEmailAndPassword($("email").value,$("senha").value);
-  }catch(e){ alert(e.message); }
-}
-async function register(){
-  try{
-    const cred = await auth.createUserWithEmailAndPassword($("email").value,$("senha").value);
-    await db.collection("users").doc(cred.user.uid).set({
-      email:$("email").value,
-      role:"corretor",
-      aprovado:false,
-      equipe:"geral",
-      createdAt:Date.now()
-    },{merge:true});
-    alert("Acesso criado. Aguarde aprovação.");
-  }catch(e){ alert(e.message); }
+ try{
+   await auth.signInWithEmailAndPassword(email.value,senha.value);
+ }catch(e){alert(e.message);}
 }
 
-async function loadProfile(uid){
-  const ref = db.collection("users").doc(uid);
-  const snap = await ref.get();
-  if(!snap.exists){
-    await ref.set({email:auth.currentUser.email,role:"corretor",aprovado:false,equipe:"geral"},{merge:true});
-    return (await ref.get()).data();
-  }
-  const p = snap.data();
-  if(auth.currentUser.email==="jo.alvenasolucoes@gmail.com"){
-    await ref.set({role:"diretor",aprovado:true},{merge:true});
-    p.role="diretor"; p.aprovado=true;
-  }
-  return p;
+async function criarConta(){
+ try{
+   const r=await auth.createUserWithEmailAndPassword(email.value,senha.value);
+   await db.collection("users").doc(r.user.uid).set({
+     email:email.value,
+     nome:"",
+     role:"corretor",
+     aprovado:false
+   });
+   alert("Acesso criado. Aguarde aprovação.");
+ }catch(e){alert(e.message);}
 }
 
-function roleTabs(role){
-  const tabs = $("tabs");
-  tabs.classList.remove("hidden");
-  const arr = [...tabs.querySelectorAll(".tab")];
-  arr.forEach(t=>t.style.display="block");
-  if(role==="gerente"){
-    arr.find(t=>t.dataset.tab==="atendimento").style.display="none";
-  }
+/* ================= DASH ================= */
+function renderApp(user){
+ app.innerHTML=`
+ <h1>PROEFI - ALVENA</h1>
+ <div class="sub">${userData.nome||user.email}</div>
+
+ <div class="card">
+   <b>Status:</b> ${focoExtremo?"FOCO EXTREMO":"NORMAL"}
+   <button class="btn btnBlue" onclick="pegarLead()">PEGAR PRÓXIMO LEAD</button>
+ </div>
+
+ <div class="card" id="leadArea">
+   Nenhum lead.
+ </div>
+
+ <div class="tabs">
+   <div class="tab">Painel</div>
+   <div class="tab">Atendimento</div>
+   <div class="tab">Mini CRM</div>
+   <div class="tab">Resultados</div>
+   <div class="tab">Config</div>
+ </div>`;
 }
 
-function setTab(tab){
-  state.currentTab = tab;
-  [...$("tabs").querySelectorAll(".tab")].forEach(t=>t.classList.toggle("active",t.dataset.tab===tab));
-  renderApp();
+/* ================= LEADS ================= */
+async function pegarLead(){
+ if(!userData.aprovado){alert("Aguardando aprovação.");return;}
+
+ const snap=await db.collection("leads")
+   .where("status","==","fila")
+   .limit(1).get();
+
+ if(snap.empty){leadArea.innerHTML="Sem leads";return;}
+
+ const doc=snap.docs[0];
+ leadAtual={id:doc.id,...doc.data()};
+
+ await doc.ref.update({
+   status:"em atendimento",
+   corretorId:auth.currentUser.uid,
+   inicio:now()
+ });
+
+ mostrarLead();
 }
 
-$("tabs").addEventListener("click",e=>{
-  const t=e.target.closest(".tab");
-  if(!t) return;
-  setTab(t.dataset.tab);
-});
-
-async function renderApp(){
-  if(!state.user){ showLogin(); return; }
-  const p = state.profile;
-  if(!p.aprovado){
-    $("tabs").classList.add("hidden");
-    $("app").innerHTML = `<div class="card"><h3>Aguardando aprovação</h3>
-    <div class="small">Peça ao diretor/gerente para aprovar seu acesso.</div>
-    <button class="btn btn-secondary" onclick="logout()">Sair</button></div>`;
-    return;
-  }
-  roleTabs(p.role);
-
-  if(state.currentTab==="painel") return renderPainel();
-  if(state.currentTab==="atendimento") return renderAtendimento();
-  if(state.currentTab==="mini") return renderMini();
-  if(state.currentTab==="resultados") return renderResultados();
-  if(state.currentTab==="config") return renderConfig();
+function mostrarLead(){
+ leadArea.innerHTML=`
+ <b>${leadAtual.nome||"Sem nome"}</b><br>
+ ${leadAtual.telefone||""}<br>
+ <button class="btn btnGreen" onclick="atendeu()">ATENDEU</button>
+ <button class="btn btnRed" onclick="naoAtendeu()">NÃO ATENDEU</button>`;
 }
 
-async function renderPainel(){
-  const p=state.profile;
-  let html = `<div class="card"><h2>Painel (${p.role.toUpperCase()})</h2>
-  <div class="small">Logado como ${state.user.email}</div>
-  <button class="btn btn-secondary" onclick="logout()">Sair</button></div>`;
+async function naoAtendeu(){
+ if(!leadAtual)return;
 
-  if(p.role==="diretor" || p.role==="gerente"){
-    const pend = await db.collection("users").where("aprovado","!=",true).get().catch(()=>null);
-    html += `<div class="card"><h3>Acessos pendentes</h3>`;
-    if(!pend || pend.empty){ html += `<div class="small">Nenhum pendente.</div>`; }
-    else{
-      pend.forEach(d=>{
-        const u=d.data();
-        html += `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px">
-          <div>${u.email || d.id} <span class="badge">${u.role||"corretor"}</span></div>
-          <button class="btn btn-primary" style="width:auto" onclick="approve('${d.id}')">Aprovar</button>
-        </div>`;
-      });
-    }
-    html += `</div>`;
-  }
+ await db.collection("leads").doc(leadAtual.id).update({
+   status:"fila",
+   ultimoCorretor:auth.currentUser.uid
+ });
 
-  // Top 5
-  const top = await computeTop();
-  html += `<div class="card"><h3>🔥 Top 5 Empresa</h3>`;
-  if(top.length===0) html += `<div class="small">Sem dados ainda.</div>`;
-  top.forEach((t,i)=> html += `<div>${i+1}º ${t.name} — ${t.points} pts</div>`);
-  html += `</div>`;
-
-  $("app").innerHTML = html;
+ leadAtual=null;
+ pegarLead(); // automático
 }
 
-async function approve(uid){
-  await db.collection("users").doc(uid).set({aprovado:true},{merge:true});
-  alert("Aprovado!");
-  renderPainel();
+async function atendeu(){
+ if(!leadAtual)return;
+ beep();
+
+ await db.collection("leads").doc(leadAtual.id).update({
+   status:"finalizado",
+   resultado:"ATENDEU",
+   fim:now()
+ });
+
+ leadArea.innerHTML="Lead finalizado.";
+ leadAtual=null;
 }
 
-async function renderAtendimento(){
-  const p=state.profile;
-  if(p.role!=="corretor"){
-    $("app").innerHTML = `<div class="card"><h3>Atendimento desativado para este perfil.</h3></div>`;
-    return;
-  }
-  const lead = state.lead;
-  let html = `<div class="card"><h2>Atendimento</h2>
-  <div class="small">Tempo logado: ${state.loginAt?fmtTime(Date.now()-state.loginAt):"0m 0s"}</div>
-  <div class="row row-2">
-    <button class="btn btn-secondary" onclick="nextLead()">Pegar próximo lead</button>
-    <button class="btn" onclick="pauseToggle()">Ativo/Pausado</button>
-  </div></div>`;
-
-  if(!lead){
-    html += `<div class="card"><div class="small">Nenhum lead em atendimento.</div></div>`;
-  }else{
-    html += `<div class="card">
-      <h3>${lead.nome||"Sem nome"}</h3>
-      <div>${lead.telefone||"-"} · ${lead.email||"-"}</div>
-      <div class="row row-2" style="margin-top:8px">
-        <button class="btn btn-ok" onclick="markAtendeu()">ATENDEU</button>
-        <button class="btn btn-no" onclick="markNaoAtendeu()">NÃO ATENDEU</button>
-      </div>
-      <div id="flow"></div>
-    </div>`;
-  }
-
-  $("app").innerHTML = html;
-}
-
-async function nextLead(){
-  if(state.leadRef){ alert("Finalize o lead atual."); return; }
-  const q = await db.collection("leads").where("status","==","fila").limit(1).get();
-  if(q.empty){ alert("Sem leads na fila."); return; }
-  const doc=q.docs[0];
-  state.leadRef = doc.ref;
-  state.lead = doc.data();
-  await doc.ref.set({status:"em_atendimento",corretorId:state.user.uid,startedAt:Date.now()},{merge:true});
-  renderAtendimento();
-}
-
-function markAtendeu(){
-  $("flow").innerHTML = `
-  <div class="card" style="margin-top:8px">
-    <div class="row row-3">
-      <button class="btn btn-primary" onclick="finishLead('AGENDAMENTO')">Agendamento</button>
-      <button class="btn btn-primary" onclick="finishLead('PROMESSA DOCUMENTAÇÃO')">Promessa</button>
-      <button class="btn btn-secondary" onclick="finishLead('SEM INTERESSE')">Sem interesse</button>
-    </div>
-    <textarea id="obs" placeholder="Feedback (obrigatório se Sem interesse)"></textarea>
-  </div>`;
-}
-
-async function markNaoAtendeu(){
-  if(!state.leadRef) return;
-  await state.leadRef.set({status:"fila",atendeu:false,lastTry:Date.now()},{merge:true});
-  state.lead=null; state.leadRef=null;
-  await nextLead();
-}
-
-async function finishLead(result){
-  if(!state.leadRef) return;
-  const obs = $("obs") ? $("obs").value.trim() : "";
-  if(result==="SEM INTERESSE" && !obs){ alert("Preencha o feedback."); return; }
-  await state.leadRef.set({
-    status:"finalizado",
-    atendeu:true,
-    resultado:result,
-    observacao:obs,
-    finishedAt:Date.now(),
-    corretorId:state.user.uid,
-    equipe:state.profile.equipe||"geral"
-  },{merge:true});
-  if(result!=="SEM INTERESSE") safePlay();
-  state.lead=null; state.leadRef=null;
-  renderAtendimento();
-}
-
-function pauseToggle(){ alert("Status pausado/ativo salvo automaticamente (placeholder)."); }
-
-async function renderMini(){
-  const role=state.profile.role;
-  const q = await db.collection("leads").where("atendeu","==",true).limit(100).get();
-  let html = `<div class="card"><h2>Mini CRM</h2></div><div class="card">`;
-  if(q.empty){ html += `<div class="small">Sem registros.</div>`; }
-  else{
-    q.forEach(d=>{
-      const x=d.data();
-      if(!(x.resultado==="AGENDAMENTO" || x.resultado==="PROMESSA DOCUMENTAÇÃO")) return;
-      if(role==="diretor"){
-        html += `<div>${x.resultado} · 👤 ${x.corretorId||"-"}</div>`;
-      }else if(role==="gerente"){
-        html += `<div>${x.nome||"-"} · ${x.telefone||"-"} · ${x.resultado} · 👤 ${x.corretorId||"-"}</div>`;
-      }else{
-        if(x.corretorId!==state.user.uid) return;
-        html += `<div>${x.nome||"-"} · ${x.resultado}</div>`;
-      }
-    });
-  }
-  html += `</div>`;
-  $("app").innerHTML = html;
-}
-
-async function renderResultados(){
-  const html = `
-  <div class="card"><h2>Resultados</h2>
-  <div class="row row-2">
-    <input type="date" id="de"/>
-    <input type="date" id="ate"/>
-  </div>
-  <button class="btn btn-primary" onclick="gerarRelatorio()">Gerar relatório (Excel)</button>
-  </div>
-  <div class="card table-wrap"><table id="tbl">
-    <thead><tr><th>Corretor</th><th>Atendidos</th><th>Agend.</th><th>Promessas</th><th>Pontos</th></tr></thead>
-    <tbody></tbody>
-  </table></div>`;
-  $("app").innerHTML = html;
-  await fillRanking();
-}
-
-async function fillRanking(){
-  const top = await computeTop();
-  const tbody = document.querySelector("#tbl tbody");
-  tbody.innerHTML="";
-  top.forEach(t=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${t.name}</td><td>${t.atendidos}</td><td>${t.ag}</td><td>${t.pr}</td><td>${t.points}</td>`;
-    tbody.appendChild(tr);
-  });
-}
-
-async function computeTop(){
-  const q = await db.collection("leads").where("atendeu","==",true).get();
-  const map={};
-  q.forEach(d=>{
-    const x=d.data();
-    const id=x.corretorId||"sem";
-    if(!map[id]) map[id]={name:id,atendidos:0,ag:0,pr:0,points:0};
-    map[id].atendidos++;
-    if(x.resultado==="AGENDAMENTO"){map[id].ag++; map[id].points+=5;}
-    if(x.resultado==="PROMESSA DOCUMENTAÇÃO"){map[id].pr++; map[id].points+=2;}
-  });
-  return Object.values(map).sort((a,b)=>b.points-a.points).slice(0,5);
-}
-
-async function gerarRelatorio(){
-  const top = await computeTop();
-  const ws = XLSX.utils.json_to_sheet(top);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,"Resultados");
-  XLSX.writeFile(wb,"proefi_resultados.xlsx");
-}
-
-async function renderConfig(){
-  const p=state.profile;
-  let html = `<div class="card"><h2>Configurações</h2>
-  <textarea id="msg">${p.mensagemPadrao||""}</textarea>
-  <button class="btn btn-primary" onclick="saveMsg()">Salvar mensagem padrão</button>
-  </div>`;
-
-  if(p.role==="diretor" || p.role==="gerente" || p.role==="corretor"){
-    html += `<div class="card"><h3>Upload de lista (A:Nome B:Telefone C:Email)</h3>
-      <input type="file" id="file" accept=".xlsx,.xls,.csv"/>
-      <button class="btn btn-secondary" onclick="uploadLista()">Enviar</button>
-      <div class="small">Distribuição simples para fila.</div>
-    </div>`;
-  }
-  $("app").innerHTML = html;
-}
-
-async function saveMsg(){
-  await db.collection("users").doc(state.user.uid).set({mensagemPadrao:$("msg").value},{merge:true});
-  alert("Mensagem salva.");
-}
-
-function parseSheet(file){
-  return new Promise((resolve,reject)=>{
-    const reader = new FileReader();
-    reader.onload = e=>{
-      try{
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data,{type:'array'});
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws,{header:1});
-        resolve(json);
-      }catch(err){ reject(err); }
-    };
-    reader.onerror=reject;
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function uploadLista(){
-  const f = $("file").files[0];
-  if(!f){ alert("Escolha um arquivo."); return; }
-  const rows = await parseSheet(f);
-  let count=0;
-  for(let i=1;i<rows.length;i++){
-    const r=rows[i];
-    if(!r || !r[0]) continue;
-    await db.collection("leads").add({
-      nome:r[0]||"",
-      telefone:r[1]||"",
-      email:r[2]||"",
-      status:"fila",
-      createdAt:Date.now()
-    });
-    count++;
-  }
-  alert(`Lista enviada: ${count} leads.`);
-}
-
-async function logout(){
-  try{ await auth.signOut(); }catch(e){}
-}
-
+/* ================= AUTH ================= */
 auth.onAuthStateChanged(async user=>{
-  state.user=user;
-  if(!user){ state.profile=null; showLogin(); return; }
-  state.profile = await loadProfile(user.uid);
-  state.loginAt = Date.now();
-  setTab('painel');
+ if(!user){renderLogin();return;}
+
+ const snap=await db.collection("users").doc(user.uid).get();
+ if(!snap.exists){renderLogin();return;}
+
+ userData=snap.data();
+
+ if(user.email==="jo.alvenasolucoes@gmail.com"){
+   userData.role="diretor";
+   userData.aprovado=true;
+ }
+
+ if(!userData.aprovado){
+   app.innerHTML=`<div class="card">Aguardando aprovação do diretor.</div>`;
+   return;
+ }
+
+ renderApp(user);
 });
+
+/* ================= MODO VENDEDOR ================= */
+setInterval(()=>{
+ if(now()-ultimaAcao>600000){
+   alert("⚡ Vamos voltar ao foco? Seu ranking pode subir agora.");
+   ultimaAcao=now();
+ }
+},60000);
+
+document.addEventListener("click",()=>ultimaAcao=now());
+
 </script>
 </body>
 </html>
