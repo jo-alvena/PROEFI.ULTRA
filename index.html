@@ -1,1 +1,178 @@
-<!doctype html><html><head><meta charset='utf-8'><title>PROEFI</title></head><body>Arquivo gerado.</body></html>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROEFI - ALVENA ENTERPRISE</title>
+
+<!-- FIREBASE -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<style>
+/* ===== ENTERPRISE UI ===== */
+:root{
+--blue:#1f2f63;
+--gold:#c79a24;
+--bg:#0f1c42;
+--card:#ffffff;
+--green:#b9f6ca;
+--red:#ffc9c9;
+}
+body{margin:0;font-family:Arial;background:var(--bg);color:#fff}
+.wrap{max-width:540px;margin:auto;padding:12px}
+.card{background:#fff;color:#1f2f63;padding:14px;border-radius:14px;margin-bottom:12px}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-weight:700;margin-top:8px}
+.gold{background:var(--gold);color:#fff}
+.blue{background:var(--blue);color:#fff}
+.green{background:var(--green)}
+.red{background:var(--red)}
+.tabs{
+position:fixed;bottom:0;left:0;right:0;
+display:flex;background:#fff;
+border-top:1px solid #ddd;
+}
+.tab{
+flex:1;padding:14px;font-weight:700;
+text-align:center;font-size:16px;
+color:#1f2f63;
+}
+.brand{text-align:center;margin:10px 0}
+h1{margin:0;color:var(--gold)}
+small{opacity:.8}
+</style>
+</head>
+
+<body>
+<div class="wrap" id="app">Carregando CRM...</div>
+
+<script>
+/* ===== FIREBASE ===== */
+const firebaseConfig={
+apiKey:"AIzaSyAPO-xtmzg0QMvSoDfHd6nRcmrDb7F8n6k",
+authDomain:"proefi-alvena.firebaseapp.com",
+projectId:"proefi-alvena",
+storageBucket:"proefi-alvena.firebasestorage.app",
+messagingSenderId:"1084612497727",
+appId:"1:1084612497727:web:d9b1de2962cce8123b038a"
+};
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth();
+const db=firebase.firestore();
+
+/* ===== HELPERS ===== */
+const $=id=>document.getElementById(id);
+function now(){return Date.now();}
+
+/* ===== LOGIN ===== */
+function renderLogin(){
+app.innerHTML=`
+<div class="brand">
+<h1>PROEFI - ALVENA</h1>
+<small>Produção Eficiente • Alvena Soluções Imobiliárias</small>
+</div>
+<div class="card">
+<input id="email" placeholder="Email"><br><br>
+<input id="senha" type="password" placeholder="Senha">
+<button class="btn gold" onclick="login()">ENTRAR</button>
+<button class="btn blue" onclick="registrar()">CRIAR ACESSO</button>
+</div>`;
+}
+
+window.login=async()=>{
+try{
+await auth.signInWithEmailAndPassword(email.value,senha.value);
+}catch(e){alert(e.message)}
+};
+
+window.registrar=async()=>{
+try{
+const r=await auth.createUserWithEmailAndPassword(email.value,senha.value);
+await db.collection("users").doc(r.user.uid).set({
+email:email.value,
+role:"pendente",
+aprovado:false,
+criadoEm:now()
+});
+alert("Acesso criado. Aguarde aprovação.");
+}catch(e){alert(e.message)}
+};
+
+/* ===== DASHBOARD ===== */
+function renderDiretor(user,data){
+app.innerHTML=`
+<div class="brand"><h1>DIRETOR</h1></div>
+
+<div class="card">
+<b>Aprovações Pendentes</b>
+<div id="aprovs">Carregando...</div>
+</div>
+
+<div class="card">
+<b>Ranking Empresa TOP 5</b>
+<div id="ranking">Carregando...</div>
+</div>
+
+<div class="tabs">
+<div class="tab">Painel</div>
+<div class="tab">Mini CRM</div>
+<div class="tab">Resultados</div>
+<div class="tab">Config</div>
+</div>
+`;
+loadAprovacoes();
+}
+
+async function loadAprovacoes(){
+const s=await db.collection("users")
+.where("aprovado","==",false).get();
+aprovs.innerHTML="";
+s.forEach(d=>{
+const u=d.data();
+aprovs.innerHTML+=`
+<div class="card">
+${u.email}
+<button class="btn green" onclick="aprovar('${d.id}')">APROVAR</button>
+</div>`;
+});
+}
+
+window.aprovar=async(uid)=>{
+await db.collection("users").doc(uid).update({
+aprovado:true,
+role:"corretor"
+});
+loadAprovacoes();
+};
+
+/* ===== AUTH ===== */
+auth.onAuthStateChanged(async user=>{
+if(!user){renderLogin();return;}
+
+const doc=await db.collection("users").doc(user.uid).get();
+if(!doc.exists){renderLogin();return;}
+
+const data=doc.data();
+
+if(user.email==="jo.alvenasolucoes@gmail.com"){
+renderDiretor(user,data);
+return;
+}
+
+if(!data.aprovado){
+app.innerHTML="<div class='card'>Aguardando aprovação do gestor/diretor.</div>";
+return;
+}
+
+if(data.role==="gerente"){
+app.innerHTML="<div class='card'>PAINEL GERENTE ENTERPRISE (ativo)</div>";
+return;
+}
+
+app.innerHTML="<div class='card'>PAINEL CORRETOR ENTERPRISE (ativo)</div>";
+});
+</script>
+</body>
+</html>
