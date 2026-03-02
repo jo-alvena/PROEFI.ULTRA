@@ -41,7 +41,7 @@
     .wrap{
       max-width: 820px;
       margin:0 auto;
-      padding: 16px 14px 96px; /* + espaço pro menu inferior */
+      padding: 16px 14px 96px;
     }
 
     .brand{
@@ -143,7 +143,7 @@
     .danger{ color:#b00020; font-weight:900; }
     .ok{ color:#0b6b2b; font-weight:900; }
 
-    /* ====== Tabs bottom (corrigido para não bagunçar) ====== */
+    /* Tabs bottom */
     .tabs{
       position: fixed;
       left:0; right:0; bottom:0;
@@ -152,9 +152,9 @@
       border-top: 1px solid rgba(255,255,255,0.12);
       display:flex;
       gap: 10px;
-      justify-content:flex-start;      /* não centraliza e não aperta */
+      justify-content:flex-start;
       align-items:center;
-      overflow-x:auto;                 /* scroll horizontal */
+      overflow-x:auto;
       overflow-y:hidden;
       -webkit-overflow-scrolling: touch;
       z-index:9999;
@@ -163,8 +163,8 @@
     .tabs::-webkit-scrollbar{ height:0px; }
 
     .tabBtn{
-      flex: 0 0 auto;                  /* NÃO quebra / NÃO estica */
-      min-width: 140px;                /* tamanho estável */
+      flex: 0 0 auto;
+      min-width: 140px;
       padding: 14px 12px;
       border-radius: 14px;
       border: 1px solid rgba(255,255,255,0.15);
@@ -210,7 +210,6 @@
     .tagPr{ background: rgba(188,138,11,0.18); }
     .tagSi{ background: rgba(255,204,203,0.8); }
 
-    /* Results responsive fix */
     .tableWrap{
       overflow-x:auto;
       -webkit-overflow-scrolling: touch;
@@ -236,7 +235,6 @@
       font-weight: 900;
     }
 
-    /* Collapsible finalize panel */
     .collapseHeader{
       display:flex;
       gap:10px;
@@ -256,7 +254,6 @@
     }
     .collapseBody.open{ display:block; }
 
-    /* Modal confirm */
     .modalBackdrop{
       position:fixed;
       inset:0;
@@ -277,13 +274,24 @@
       box-shadow: 0 16px 40px rgba(0,0,0,0.25);
     }
     .modal h3{ margin: 0 0 8px; }
+
+    .errorBox{
+      margin-top:10px;
+      padding:10px;
+      border-radius:12px;
+      background: rgba(176,0,32,0.08);
+      border: 1px solid rgba(176,0,32,0.25);
+      color:#b00020;
+      font-weight:700;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 
 <body>
   <div class="wrap" id="app">Carregando...</div>
 
-  <!-- modal -->
   <div class="modalBackdrop" id="modalBackdrop">
     <div class="modal">
       <h3 id="modalTitle">Confirmar</h3>
@@ -313,20 +321,16 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
-/** =========================
- *  CONSTANTES IMPORTANTES
- *  ========================= */
-const MASTER_DIRECTOR_EMAIL = "jo.alvenasolucoes@gmail.com"; // sempre diretor master
+const MASTER_DIRECTOR_EMAIL = "jo.alvenasolucoes@gmail.com";
 
 /** =========================
- *  STATE GLOBAL
+ *  STATE
  *  ========================= */
-let loginTimestamp = null;
 let leadAtualRef = null;
 let leadAtualData = null;
 let detailsOpen = false;
 
-let currentTab = "painel"; // painel | atendimento | minicrm | resultados | config | aprovacao
+let currentTab = "painel";
 let cachedUserData = null;
 let cachedAuthUser = null;
 
@@ -337,6 +341,7 @@ let modalResolve = null;
  *  ========================= */
 function $(id){ return document.getElementById(id); }
 function nowMs(){ return Date.now(); }
+function safe(v){ return (v===undefined || v===null) ? "" : String(v); }
 function cleanPhone(raw){ return String(raw||"").replace(/\D/g,''); }
 
 function dayKey(ts){
@@ -360,6 +365,11 @@ function isoDaysAgo(days){
   d.setDate(d.getDate() - Number(days || 0));
   return toISODateInput(d.getTime());
 }
+function rangeToTs(dateStr, end=false){
+  const [y,m,d] = dateStr.split("-").map(n=>parseInt(n,10));
+  if(!end) return new Date(y, m-1, d, 0,0,0,0).getTime();
+  return new Date(y, m-1, d, 23,59,59,999).getTime();
+}
 
 function templateMessage(msg, lead){
   const nome = lead?.nome || "";
@@ -375,8 +385,6 @@ async function getUserDoc(uid){
   const snap = await db.collection("users").doc(uid).get();
   return snap.exists ? snap.data() : null;
 }
-
-function safe(v){ return (v===undefined || v===null) ? "" : String(v); }
 
 function beepCash(){
   try{
@@ -440,7 +448,6 @@ function renderHeader(role, email, extraHtml=""){
 
 function renderTabsForRole(role){
   let tabs = [];
-
   if(role === "corretor"){
     tabs = [
       ["painel","PAINEL"],
@@ -489,10 +496,8 @@ function renderLogin(){
     <div class="card">
       <div class="fieldLabel">Email</div>
       <input id="email" placeholder="Digite seu email" style="border:2px solid var(--gold)" />
-
       <div class="fieldLabel">Senha</div>
       <input id="senha" type="password" placeholder="Digite sua senha" style="border:2px solid var(--gold)" />
-
       <div class="divider"></div>
       <div class="grid2">
         <button class="btn btnGold" onclick="doLogin()">ENTRAR</button>
@@ -512,7 +517,7 @@ function renderLogin(){
       <div class="fieldLabel">Nome</div>
       <input id="nomeSignup" placeholder="Seu nome" />
 
-      <div class="fieldLabel">Equipe (ex: equipe1)</div>
+      <div class="fieldLabel">Equipe</div>
       <input id="equipeSignup" placeholder="ex: equipe1" />
 
       <div class="fieldLabel">Perfil</div>
@@ -564,7 +569,6 @@ window.doSignup = async function(){
       aprovado: (email.toLowerCase() === MASTER_DIRECTOR_EMAIL.toLowerCase()),
       aprovadoEm: (email.toLowerCase() === MASTER_DIRECTOR_EMAIL.toLowerCase()) ? nowMs() : null,
       aprovadoPor: (email.toLowerCase() === MASTER_DIRECTOR_EMAIL.toLowerCase()) ? "MASTER" : null,
-
       ativo: false,
       ativoAtualizadoEm: nowMs(),
       mensagemPadrao: "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.",
@@ -626,11 +630,11 @@ function makeLeadDoc(base){
     nome: base.nome || "",
     telefone: base.telefone || "",
     email: base.email || "",
-    status: "fila",              // fila | em_atendimento | finalizado
+    status: "fila",
     corretorId: null,
     corretorEmail: null,
     equipe: null,
-    origem: null,                // geral | gerente | corretor
+    origem: null, // geral | gerente | corretor
     donoUpload: null,
     listaRef: null,
 
@@ -781,7 +785,6 @@ async function listPendingUsers(scopeUser){
   const myRole = scopeUser.role;
   const myEquipe = scopeUser.equipe || "equipe1";
   let q = db.collection("users").where("aprovado","==",false);
-
   if(myRole === "gerente"){
     q = q.where("equipe","==",myEquipe);
   }
@@ -804,81 +807,134 @@ async function denyUser(uid){
 }
 
 /** =========================
- *  REPORTS / TOP5
+ *  USERS MAP (nomes)
  *  ========================= */
-function rangeToTs(dateStr, end=false){
-  const [y,m,d] = dateStr.split("-").map(n=>parseInt(n,10));
-  if(!end){
-    return new Date(y, m-1, d, 0,0,0,0).getTime();
+async function fetchUsersMapByIds(ids){
+  const uniq = Array.from(new Set((ids||[]).filter(Boolean)));
+  if(!uniq.length) return {};
+  const chunks = [];
+  const copy = uniq.slice();
+  while(copy.length) chunks.push(copy.splice(0, 10));
+
+  const map = {};
+  for(const c of chunks){
+    const snap = await db.collection("users")
+      .where(firebase.firestore.FieldPath.documentId(),"in",c)
+      .get();
+    snap.forEach(d=>{ map[d.id] = d.data(); });
   }
-  return new Date(y, m-1, d, 23,59,59,999).getTime();
+  return map;
+}
+function displayCorretorName(row, usersMap){
+  const u = usersMap && row.corretorId ? (usersMap[row.corretorId] || null) : null;
+  return safe((u && u.nome) ? u.nome : (row.corretorEmail || row.corretorId));
 }
 
-async function fetchLeadsForPeriod({ scope, myUser, de, ate }){
+/** =========================================================
+ *  🔥 CORREÇÃO PRINCIPAL: LEITURAS SEM ÍNDICE COMPOSTO
+ *  - Buscamos por orderBy simples e filtramos no JS
+ *  - Assim Top5 / MiniCRM / Relatórios param de "Carregando..."
+ *  ========================================================= */
+
+// Puxa finalizados recentes sem where(status==...), e filtra no JS
+async function fetchFinalizadosRecentes({ limit=1500 }={}){
+  const snap = await db.collection("leads")
+    .orderBy("timestampFinalizacao","desc")
+    .limit(limit)
+    .get();
+
+  const arr = [];
+  snap.forEach(d=>{
+    const x = d.data() || {};
+    // só considera se tiver timestampFinalizacao (senão pode vir nulo)
+    if(!x.timestampFinalizacao) return;
+    arr.push({ id:d.id, ...x });
+  });
+  return arr;
+}
+
+// Puxa tentativas recentes (distribuicao) sem where, filtra no JS
+async function fetchTentativasRecentes({ limit=2000 }={}){
+  const snap = await db.collection("leads")
+    .orderBy("timestampDistribuicao","desc")
+    .limit(limit)
+    .get();
+
+  const arr = [];
+  snap.forEach(d=>{
+    const x = d.data() || {};
+    if(!x.timestampDistribuicao) return;
+    arr.push({ id:d.id, ...x });
+  });
+  return arr;
+}
+
+function inRange(ts, startTs, endTs){
+  return (typeof ts === "number") && ts >= startTs && ts <= endTs;
+}
+
+function applyScope(list, { scope, myUser }){
+  if(scope === "corretor"){
+    return list.filter(x => x.corretorId === myUser.uid);
+  }
+  if(scope === "gerente"){
+    const eq = myUser.equipe || "equipe1";
+    return list.filter(x => (x.equipe||"") === eq);
+  }
+  return list; // diretor: tudo
+}
+
+// Faz o período DE/ATÉ usando dados recentes (sem índices compostos)
+async function fetchLeadsForPeriodNoIndex({ scope, myUser, de, ate }){
   const startTs = rangeToTs(de, false);
   const endTs   = rangeToTs(ate, true);
 
-  let base = db.collection("leads");
+  // Para histórico grande: aumente limit se precisar.
+  // Quanto maior, mais pesado no celular. Mantive seguro.
+  const [finalizadosAll, tentativasAll] = await Promise.all([
+    fetchFinalizadosRecentes({ limit: 2500 }),
+    fetchTentativasRecentes({ limit: 3500 })
+  ]);
 
-  let qFinal = base.where("status","==","finalizado")
-    .where("timestampFinalizacao", ">=", startTs)
-    .where("timestampFinalizacao", "<=", endTs);
+  // filtra por período
+  let finals = finalizadosAll.filter(x => inRange(x.timestampFinalizacao, startTs, endTs) && (x.status === "finalizado" || x.atendeu === true || !!x.resultado));
+  let tries  = tentativasAll.filter(x => inRange(x.timestampDistribuicao, startTs, endTs));
 
-  let qTry = base.where("timestampDistribuicao", ">=", startTs)
-    .where("timestampDistribuicao", "<=", endTs);
+  // aplica escopo
+  finals = applyScope(finals, { scope, myUser });
+  tries  = applyScope(tries,  { scope, myUser });
 
-  if(scope === "corretor"){
-    qFinal = qFinal.where("corretorId","==",myUser.uid);
-    qTry   = qTry.where("corretorId","==",myUser.uid);
-  }else if(scope === "gerente"){
-    const equipe = myUser.equipe || "equipe1";
-    qFinal = qFinal.where("equipe","==",equipe);
-    qTry   = qTry.where("equipe","==",equipe);
-  }
-
-  const [finalSnap, trySnap] = await Promise.all([qFinal.get(), qTry.get()]);
-  const finals = finalSnap.docs.map(d=>({id:d.id, ...d.data()}));
-  const tries  = trySnap.docs.map(d=>({id:d.id, ...d.data()}));
   return { finals, tries };
 }
 
 function computeScoreboard({ finals, tries }){
   const byCorretor = {};
-  for(const t of tries){
+
+  for(const t of (tries||[])){
     const cid = t.corretorId || "SEM";
-    if(!byCorretor[cid]) byCorretor[cid] = { corretorId: cid, corretorEmail: t.corretorEmail||"", tentativas:0, atendidos:0, ag:0, pr:0, si:0, pontos:0 };
+    if(cid === "SEM") continue;
+    if(!byCorretor[cid]){
+      byCorretor[cid] = { corretorId: cid, corretorEmail: t.corretorEmail||"", tentativas:0, atendidos:0, ag:0, pr:0, si:0, pontos:0 };
+    }
     byCorretor[cid].tentativas += 1;
   }
-  for(const f of finals){
+
+  for(const f of (finals||[])){
     const cid = f.corretorId || "SEM";
-    if(!byCorretor[cid]) byCorretor[cid] = { corretorId: cid, corretorEmail: f.corretorEmail||"", tentativas:0, atendidos:0, ag:0, pr:0, si:0, pontos:0 };
+    if(cid === "SEM") continue;
+    if(!byCorretor[cid]){
+      byCorretor[cid] = { corretorId: cid, corretorEmail: f.corretorEmail||"", tentativas:0, atendidos:0, ag:0, pr:0, si:0, pontos:0 };
+    }
     byCorretor[cid].atendidos += 1;
+
     if(f.resultado === "AGENDAMENTO"){ byCorretor[cid].ag += 1; byCorretor[cid].pontos += 10; }
     else if(f.resultado === "PROMESSA DOCUMENTAÇÃO"){ byCorretor[cid].pr += 1; byCorretor[cid].pontos += 6; }
-    else { byCorretor[cid].si += 1; byCorretor[cid].pontos += 1; }
+    else if(f.atendeu === true){ byCorretor[cid].si += 1; byCorretor[cid].pontos += 1; }
   }
 
-  const list = Object.values(byCorretor).filter(x=>x.corretorId!=="SEM");
+  const list = Object.values(byCorretor);
   list.sort((a,b)=> (b.pontos - a.pontos) || (b.ag - a.ag) || (b.pr - a.pr) || (b.atendidos - a.atendidos));
   return list;
-}
-
-async function fetchUsersMapByIds(ids){
-  const uniq = Array.from(new Set(ids.filter(Boolean)));
-  const chunks = [];
-  while(uniq.length) chunks.push(uniq.splice(0, 10));
-
-  const map = {};
-  for(const c of chunks){
-    const snap = await db.collection("users").where(firebase.firestore.FieldPath.documentId(),"in",c).get();
-    snap.forEach(d=>{ map[d.id] = d.data(); });
-  }
-  return map;
-}
-
-function displayCorretorName(row, usersMap){
-  const u = usersMap && row.corretorId ? (usersMap[row.corretorId] || null) : null;
-  return safe((u && u.nome) ? u.nome : (row.corretorEmail || row.corretorId));
 }
 
 /** =========================
@@ -1271,7 +1327,7 @@ async function renderMiniCRM(role, user, ud){
       <div class="row">
         <div class="grow">
           <div><b>Mini CRM</b></div>
-          <div class="small muted">Resumo focado em Agendamentos e Promessas.</div>
+          <div class="small muted">Agendamentos e Promessas (sem travar por índice).</div>
         </div>
         <button class="btn btnGold" style="max-width:220px" onclick="loadMiniCRM()">ATUALIZAR</button>
       </div>
@@ -1282,52 +1338,69 @@ async function renderMiniCRM(role, user, ud){
 }
 
 window.loadMiniCRM = async function(){
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  const role = me.role;
-
-  let q = db.collection("leads")
-    .where("status","==","finalizado")
-    .orderBy("timestampFinalizacao","desc")
-    .limit(200);
-
-  if(role === "corretor"){
-    q = q.where("corretorId","==",user.uid);
-  }else if(role === "gerente"){
-    q = q.where("equipe","==",(me.equipe||"equipe1"));
-  }
-
-  const snap = await q.get();
-  const list = snap.docs.map(d=>({id:d.id, ...d.data()}))
-    .filter(x => x.resultado === "AGENDAMENTO" || x.resultado === "PROMESSA DOCUMENTAÇÃO");
-
-  const ids = list.map(x=>x.corretorId);
-  const usersMap = await fetchUsersMapByIds(ids);
-
   const box = $("miniCrmBox");
-  if(list.length === 0){
-    box.innerHTML = `<div class="muted">Sem registros.</div>`;
-    return;
-  }
+  if(!box) return;
+  box.innerHTML = `<div class="muted">Carregando...</div>`;
 
-  const items = list.slice(0, 60).map(l=>{
-    const who = displayCorretorName(l, usersMap);
-    const tagClass = (l.resultado==="AGENDAMENTO") ? "tagAg" : "tagPr";
-    const tag = (l.resultado==="AGENDAMENTO") ? "AGENDAMENTO" : "PROMESSA";
+  try{
+    const user = auth.currentUser;
+    const me = await getUserDoc(user.uid);
+    const role = me.role;
 
-    if(role === "diretor"){
-      return `
-        <div class="item">
-          <div class="itemTop">
-            <span class="tag ${tagClass}">${tag}</span>
-            <span class="small muted">${new Date(l.timestampFinalizacao).toLocaleString()}</span>
-          </div>
-          <div style="margin-top:8px"><b>Corretor:</b> ${who}</div>
-        </div>
-      `;
+    // busca finalizados recentes SEM where(status==finalizado)
+    let list = await fetchFinalizadosRecentes({ limit: 2500 });
+
+    // filtra só ag/pr
+    list = list.filter(x => x.resultado === "AGENDAMENTO" || x.resultado === "PROMESSA DOCUMENTAÇÃO");
+
+    // escopo
+    if(role === "corretor"){
+      list = list.filter(x => x.corretorId === user.uid);
+    }else if(role === "gerente"){
+      const eq = me.equipe || "equipe1";
+      list = list.filter(x => (x.equipe||"") === eq);
     }
 
-    if(role === "gerente"){
+    if(list.length === 0){
+      box.innerHTML = `<div class="muted">Sem agendamentos/promessas ainda.</div>`;
+      return;
+    }
+
+    // nomes
+    const ids = list.map(x=>x.corretorId).filter(Boolean);
+    const usersMap = await fetchUsersMapByIds(ids);
+
+    const items = list.slice(0, 60).map(l=>{
+      const who = displayCorretorName(l, usersMap);
+      const tagClass = (l.resultado==="AGENDAMENTO") ? "tagAg" : "tagPr";
+      const tag = (l.resultado==="AGENDAMENTO") ? "AGENDAMENTO" : "PROMESSA";
+
+      if(role === "diretor"){
+        return `
+          <div class="item">
+            <div class="itemTop">
+              <span class="tag ${tagClass}">${tag}</span>
+              <span class="small muted">${new Date(l.timestampFinalizacao).toLocaleString()}</span>
+            </div>
+            <div style="margin-top:8px"><b>Corretor:</b> ${who}</div>
+          </div>
+        `;
+      }
+
+      if(role === "gerente"){
+        return `
+          <div class="item">
+            <div class="itemTop">
+              <span class="tag ${tagClass}">${tag}</span>
+              <span class="small muted">${new Date(l.timestampFinalizacao).toLocaleString()}</span>
+            </div>
+            <div style="margin-top:8px"><b>${safe(l.nome||"")}</b></div>
+            <div class="small muted">${safe(l.telefone||"")}</div>
+            <div style="margin-top:6px"><b>Corretor:</b> ${who}</div>
+          </div>
+        `;
+      }
+
       return `
         <div class="item">
           <div class="itemTop">
@@ -1335,26 +1408,16 @@ window.loadMiniCRM = async function(){
             <span class="small muted">${new Date(l.timestampFinalizacao).toLocaleString()}</span>
           </div>
           <div style="margin-top:8px"><b>${safe(l.nome||"")}</b></div>
-          <div class="small muted">${safe(l.telefone||"")}</div>
-          <div style="margin-top:6px"><b>Corretor:</b> ${who}</div>
+          <div class="small muted">${safe(l.telefone||"")} • ${safe(l.email||"")}</div>
+          <div class="small muted" style="margin-top:6px">${safe(l.observacao||"")}</div>
         </div>
       `;
-    }
+    }).join("");
 
-    return `
-      <div class="item">
-        <div class="itemTop">
-          <span class="tag ${tagClass}">${tag}</span>
-          <span class="small muted">${new Date(l.timestampFinalizacao).toLocaleString()}</span>
-        </div>
-        <div style="margin-top:8px"><b>${safe(l.nome||"")}</b></div>
-        <div class="small muted">${safe(l.telefone||"")} • ${safe(l.email||"")}</div>
-        <div class="small muted" style="margin-top:6px">${safe(l.observacao||"")}</div>
-      </div>
-    `;
-  }).join("");
-
-  box.innerHTML = `<div class="list">${items}</div>`;
+    box.innerHTML = `<div class="list">${items}</div>`;
+  }catch(e){
+    box.innerHTML = `<div class="errorBox">Erro ao carregar Mini CRM:\n${safe(e.message || e.code || e)}</div>`;
+  }
 };
 
 /** =========================
@@ -1367,7 +1430,7 @@ async function renderResultados(role, user, ud){
         <div><b>Resultados</b></div>
         <div class="small muted">Relatórios (Excel) são liberados apenas para <b>GERENTE</b> e <b>DIRETOR</b>.</div>
         <div class="divider"></div>
-        <button class="btn btnGold" onclick="loadTop5()">🏆 TOP 5 (Hoje / Últimos 7 dias)</button>
+        <button class="btn btnGold" onclick="loadTop5()">🏆 TOP 5</button>
         <div class="divider"></div>
         <div id="resultsBox" class="muted">Clique no TOP 5 para atualizar.</div>
       </div>
@@ -1377,7 +1440,7 @@ async function renderResultados(role, user, ud){
   return `
     <div class="card">
       <div><b>Relatórios e Rankings</b></div>
-      <div class="small muted">Escolha período (DE/ATÉ) e gere Excel + Top 5.</div>
+      <div class="small muted">Sem travar por índice (filtra no JS).</div>
       <div class="divider"></div>
 
       <div class="grid2">
@@ -1404,172 +1467,190 @@ async function renderResultados(role, user, ud){
   `;
 }
 
-/** =========================
- *  RELATÓRIO EXCEL (apenas gerente/diretor)
- *  ========================= */
 window.gerarRelatorioExcelPeriodo = async function(){
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  const role = me.role;
+  const box = $("resultsBox");
+  if(box) box.innerHTML = `<div class="muted">Gerando relatório...</div>`;
 
-  if(role === "corretor"){
-    alert("Relatório Excel disponível apenas para GERENTE e DIRETOR.");
-    return;
+  try{
+    const user = auth.currentUser;
+    const me = await getUserDoc(user.uid);
+    const role = me.role;
+
+    if(role === "corretor"){
+      alert("Relatório Excel disponível apenas para GERENTE e DIRETOR.");
+      return;
+    }
+
+    const de = $("repDe").value || toISODateInput(nowMs());
+    const ate = $("repAte").value || toISODateInput(nowMs());
+
+    const scope = (role==="gerente") ? "gerente" : "diretor";
+
+    // ✅ sem índice composto
+    const { finals, tries } = await fetchLeadsForPeriodNoIndex({
+      scope,
+      myUser: { uid:user.uid, equipe: me.equipe },
+      de, ate
+    });
+
+    const sb = computeScoreboard({ finals, tries });
+
+    const totalTentativas = tries.length;
+    const totalAtendidos = finals.length;
+    const totalAg = finals.filter(x=>x.resultado==="AGENDAMENTO").length;
+    const totalPr = finals.filter(x=>x.resultado==="PROMESSA DOCUMENTAÇÃO").length;
+    const totalSi = finals.filter(x=>x.resultado==="NÃO GEROU INTERESSE").length;
+
+    const resumo = [
+      ["PROEFI - ALVENA", ""],
+      ["Perfil", role.toUpperCase()],
+      ["Email", user.email],
+      ["Equipe", me.equipe || ""],
+      ["Período", `${de} até ${ate}`],
+      ["", ""],
+      ["Total tentativas", totalTentativas],
+      ["Total atendidos", totalAtendidos],
+      ["Agendamentos", totalAg],
+      ["Promessas", totalPr],
+      ["Não gerou interesse", totalSi],
+    ];
+    const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
+
+    const ids = sb.map(x=>x.corretorId);
+    const usersMap = await fetchUsersMapByIds(ids);
+
+    const rankRows = sb.map((r, i)=>({
+      Rank: i+1,
+      Corretor: displayCorretorName(r, usersMap),
+      Tentativas: r.tentativas,
+      Atendidos: r.atendidos,
+      Agendamentos: r.ag,
+      Promessas: r.pr,
+      "Sem interesse": r.si,
+      Pontos: r.pontos
+    }));
+    const wsRank = XLSX.utils.json_to_sheet(rankRows);
+
+    const detRows = finals.map(f=>{
+      const tempoMinutos = (f.timestampFinalizacao && f.timestampDistribuicao)
+        ? timeMin(f.timestampFinalizacao - f.timestampDistribuicao) : "";
+      return {
+        Data: f.timestampFinalizacao ? new Date(f.timestampFinalizacao).toLocaleString() : "",
+        Cliente: f.nome || "",
+        Telefone: f.telefone || "",
+        Email: f.email || "",
+        Resultado: f.resultado || "",
+        "Data/Hora Agendada": f.dataAgendada || "",
+        Feedback: f.observacao || "",
+        "Tempo Atendimento (min)": tempoMinutos,
+        Corretor: f.corretorEmail || ""
+      };
+    });
+    const wsDet = XLSX.utils.json_to_sheet(detRows);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
+    XLSX.utils.book_append_sheet(wb, wsRank, "Ranking");
+    XLSX.utils.book_append_sheet(wb, wsDet, "Atendidos");
+
+    XLSX.writeFile(wb, `PROEFI_RELATORIO_${role.toUpperCase()}_${de}_ATE_${ate}.xlsx`);
+
+    if(box){
+      box.innerHTML = `<div class="ok">Excel gerado com sucesso!</div><div class="small muted">Arquivo baixado no dispositivo.</div>`;
+    }
+  }catch(e){
+    if(box){
+      box.innerHTML = `<div class="errorBox">Erro ao gerar relatório:\n${safe(e.message || e.code || e)}</div>`;
+    }else{
+      alert(e.message || e.code || e);
+    }
   }
-
-  const de = $("repDe").value || toISODateInput(nowMs());
-  const ate = $("repAte").value || toISODateInput(nowMs());
-
-  const scope = (role==="gerente") ? "gerente" : "diretor";
-  const { finals, tries } = await fetchLeadsForPeriod({ scope, myUser: {uid:user.uid, equipe: me.equipe}, de, ate });
-
-  const sb = computeScoreboard({ finals, tries });
-
-  const totalTentativas = tries.length;
-  const totalAtendidos = finals.length;
-  const totalAg = finals.filter(x=>x.resultado==="AGENDAMENTO").length;
-  const totalPr = finals.filter(x=>x.resultado==="PROMESSA DOCUMENTAÇÃO").length;
-  const totalSi = finals.filter(x=>x.resultado==="NÃO GEROU INTERESSE").length;
-
-  const resumo = [
-    ["PROEFI - ALVENA", ""],
-    ["Perfil", role.toUpperCase()],
-    ["Email", user.email],
-    ["Equipe", me.equipe || ""],
-    ["Período", `${de} até ${ate}`],
-    ["", ""],
-    ["Total tentativas", totalTentativas],
-    ["Total atendidos", totalAtendidos],
-    ["Agendamentos", totalAg],
-    ["Promessas", totalPr],
-    ["Não gerou interesse", totalSi],
-  ];
-
-  const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
-
-  const rankRows = sb.map((r, i)=>({
-    Rank: i+1,
-    Corretor: (r.corretorEmail || r.corretorId),
-    Tentativas: r.tentativas,
-    Atendidos: r.atendidos,
-    Agendamentos: r.ag,
-    Promessas: r.pr,
-    "Sem interesse": r.si,
-    Pontos: r.pontos
-  }));
-  const wsRank = XLSX.utils.json_to_sheet(rankRows);
-
-  const detRows = finals.map(f=>{
-    const tempoMin = (f.timestampFinalizacao && f.timestampDistribuicao)
-      ? timeMin(f.timestampFinalizacao - f.timestampDistribuicao) : "";
-    return {
-      Data: f.timestampFinalizacao ? new Date(f.timestampFinalizacao).toLocaleString() : "",
-      Cliente: f.nome || "",
-      Telefone: f.telefone || "",
-      Email: f.email || "",
-      Resultado: f.resultado || "",
-      "Data/Hora Agendada": f.dataAgendada || "",
-      Feedback: f.observacao || "",
-      "Tempo Atendimento (min)": tempoMin,
-      Corretor: f.corretorEmail || ""
-    };
-  });
-  const wsDet = XLSX.utils.json_to_sheet(detRows);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
-  XLSX.utils.book_append_sheet(wb, wsRank, "Ranking");
-  XLSX.utils.book_append_sheet(wb, wsDet, "Atendidos");
-
-  XLSX.writeFile(wb, `PROEFI_RELATORIO_${role.toUpperCase()}_${de}_ATE_${ate}.xlsx`);
-
-  $("resultsBox").innerHTML = `
-    <div class="ok">Excel gerado com sucesso!</div>
-    <div class="small muted">Arquivo baixado no dispositivo.</div>
-  `;
 };
 
 /** =========================
- *  TOP 5 (corrigido para não ficar zerado)
- *  - tenta HOJE
- *  - se não tiver dados, usa ÚLTIMOS 7 DIAS
+ *  TOP 5 (corrigido: não fica carregando)
+ *  - hoje
+ *  - se vazio, últimos 7 dias
+ *  - sem índice composto (filtra no JS)
  *  ========================= */
 window.loadTop5 = async function(){
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-
-  const today = toISODateInput(nowMs());
-  const equipe = me.equipe || "equipe1";
-
   const box = $("top5Box") || $("resultsBox");
   if(!box) return;
 
   box.innerHTML = `<div class="muted">Carregando Top 5...</div>`;
 
-  async function getPeriod(de, ate){
-    const empresaData = await fetchLeadsForPeriod({
-      scope: "diretor",
-      myUser: { uid:user.uid, equipe },
-      de, ate
-    });
+  try{
+    const user = auth.currentUser;
+    const me = await getUserDoc(user.uid);
+    const equipe = me.equipe || "equipe1";
+    const today = toISODateInput(nowMs());
 
-    const sbEmpresa = computeScoreboard({ finals: empresaData.finals, tries: empresaData.tries }).slice(0,5);
+    async function computePeriod(de, ate){
+      // diretor: pega base "global" (sem índices)
+      const { finals, tries } = await fetchLeadsForPeriodNoIndex({
+        scope: "diretor",
+        myUser: { uid:user.uid, equipe },
+        de, ate
+      });
 
-    const finalsEq = empresaData.finals.filter(x => (x.equipe||"") === equipe);
-    const triesEq  = empresaData.tries.filter(x => (x.equipe||"") === equipe);
-    const sbEq = computeScoreboard({ finals: finalsEq, tries: triesEq }).slice(0,5);
+      const sbEmpresa = computeScoreboard({ finals, tries }).slice(0,5);
 
-    const ids = [...sbEmpresa.map(x=>x.corretorId), ...sbEq.map(x=>x.corretorId)].filter(Boolean);
-    const usersMap = ids.length ? await fetchUsersMapByIds(ids) : {};
+      const finalsEq = finals.filter(x => (x.equipe||"") === equipe);
+      const triesEq  = tries.filter(x => (x.equipe||"") === equipe);
+      const sbEq = computeScoreboard({ finals: finalsEq, tries: triesEq }).slice(0,5);
 
-    return { sbEmpresa, sbEq, usersMap };
-  }
+      const ids = [...sbEmpresa.map(x=>x.corretorId), ...sbEq.map(x=>x.corretorId)].filter(Boolean);
+      const usersMap = await fetchUsersMapByIds(ids);
 
-  // 1) tenta HOJE
-  let periodLabel = "hoje";
-  let de = today, ate = today;
-  let data = await getPeriod(de, ate);
+      return { sbEmpresa, sbEq, usersMap };
+    }
 
-  // 2) se vazio, usa últimos 7 dias
-  if((data.sbEmpresa.length === 0) && (data.sbEq.length === 0)){
-    de = isoDaysAgo(6);
-    ate = today;
-    periodLabel = `últimos 7 dias (${de} até ${ate})`;
-    data = await getPeriod(de, ate);
-  }
+    let de = today, ate = today;
+    let label = "hoje";
+    let data = await computePeriod(de, ate);
 
-  const renderList = (arr, usersMap)=> arr.length ? `
-    <div class="tableWrap" style="margin-top:10px">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th><th>Corretor</th><th>Pontos</th><th>Ag</th><th>Pr</th><th>Atendidos</th><th>Tentativas</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${arr.map((r,i)=>`
+    if(data.sbEmpresa.length === 0 && data.sbEq.length === 0){
+      de = isoDaysAgo(6);
+      ate = today;
+      label = `últimos 7 dias (${de} até ${ate})`;
+      data = await computePeriod(de, ate);
+    }
+
+    const renderList = (arr, usersMap)=> arr.length ? `
+      <div class="tableWrap" style="margin-top:10px">
+        <table>
+          <thead>
             <tr>
-              <td><b>${i+1}</b></td>
-              <td>${displayCorretorName(r, usersMap)}</td>
-              <td><b>${r.pontos}</b></td>
-              <td>${r.ag}</td>
-              <td>${r.pr}</td>
-              <td>${r.atendidos}</td>
-              <td>${r.tentativas}</td>
+              <th>#</th><th>Corretor</th><th>Pontos</th><th>Ag</th><th>Pr</th><th>Atendidos</th><th>Tentativas</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  ` : `<div class="muted">Sem dados no período.</div>`;
+          </thead>
+          <tbody>
+            ${arr.map((r,i)=>`
+              <tr>
+                <td><b>${i+1}</b></td>
+                <td>${displayCorretorName(r, usersMap)}</td>
+                <td><b>${r.pontos}</b></td>
+                <td>${r.ag}</td>
+                <td>${r.pr}</td>
+                <td>${r.atendidos}</td>
+                <td>${r.tentativas}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    ` : `<div class="muted">Sem dados no período.</div>`;
 
-  box.innerHTML = `
-    <div><b>Top 5 Empresa (${periodLabel})</b></div>
-    ${renderList(data.sbEmpresa, data.usersMap)}
-    <div style="height:14px"></div>
-    <div><b>Top 5 Equipe (${equipe}) (${periodLabel})</b></div>
-    ${renderList(data.sbEq, data.usersMap)}
-  `;
+    box.innerHTML = `
+      <div><b>Top 5 Empresa (${label})</b></div>
+      ${renderList(data.sbEmpresa, data.usersMap)}
+      <div style="height:14px"></div>
+      <div><b>Top 5 Equipe (${equipe}) (${label})</b></div>
+      ${renderList(data.sbEq, data.usersMap)}
+    `;
+  }catch(e){
+    box.innerHTML = `<div class="errorBox">Erro ao carregar Top 5:\n${safe(e.message || e.code || e)}</div>`;
+  }
 };
 
 /** =========================
@@ -1591,7 +1672,7 @@ async function renderConfig(role, user, ud){
 
       <div class="card">
         <div><b>Upload • Minha Lista (Corretor)</b></div>
-        <div class="small muted">Aceita XLS/XLSX/CSV (A: Nome, B: Telefone, C: Email)</div>
+        <div class="small muted">XLS/XLSX/CSV (A: Nome, B: Telefone, C: Email)</div>
         <div class="divider"></div>
         <input type="file" id="fileCorretor" accept=".xls,.xlsx,.csv" />
         <button class="btn btnBlue" onclick="uploadListaCorretor()">ENVIAR MINHA LISTA</button>
@@ -1610,7 +1691,6 @@ async function renderConfig(role, user, ud){
 
       <div class="card">
         <div><b>Email para relatórios</b></div>
-        <div class="small muted">Corretor pode enviar email pronto (opcional).</div>
         <div class="divider"></div>
         <input id="emailRelatorio" placeholder="Email do gerente (relatórios)" value="${safe(ud.emailRelatorio || "")}" />
         <button class="btn btnBlue" onclick="salvarEmailRelatorio()">SALVAR EMAIL</button>
@@ -1631,7 +1711,7 @@ async function renderConfig(role, user, ud){
   html += `
     <div class="card">
       <div><b>Relatório (Email pronto)</b></div>
-      <div class="small muted">O anexo Excel é gerado e baixado. O email só abre o envio.</div>
+      <div class="small muted">O Excel é gerado e baixado. O email só abre o envio.</div>
       <div class="divider"></div>
       <button class="btn btnGhost" onclick="prepararEmailRelatorio()">✉️ ABRIR EMAIL DE RELATÓRIO</button>
     </div>
@@ -1834,7 +1914,6 @@ auth.onAuthStateChanged(async (user)=>{
   if(!user){
     cachedAuthUser = null;
     cachedUserData = null;
-    loginTimestamp = null;
     leadAtualRef = null;
     leadAtualData = null;
     detailsOpen = false;
@@ -1844,7 +1923,6 @@ auth.onAuthStateChanged(async (user)=>{
   }
 
   cachedAuthUser = user;
-  loginTimestamp = nowMs();
 
   const snap = await db.collection("users").doc(user.uid).get();
   if(!snap.exists){
@@ -1876,8 +1954,7 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
 
-  if(cachedUserData.role === "diretor" && currentTab === "atendimento") currentTab = "painel";
-  if(cachedUserData.role === "gerente" && currentTab === "atendimento") currentTab = "painel";
+  if(cachedUserData.role !== "corretor" && currentTab === "atendimento") currentTab = "painel";
 
   await renderAppShell();
 });
