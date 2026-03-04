@@ -331,7 +331,7 @@ let leadAtualData = null;
 let detailsOpen = false;
 
 let currentTab = "painel";
-let cachedUserData = null;
+let cachedUserData = null;   // ✅ cache do usuário (reduz leituras)
 let cachedAuthUser = null;
 
 let modalResolve = null;
@@ -370,6 +370,13 @@ function rangeToTs(dateStr, end=false){
   if(!end) return new Date(y, m-1, d, 0,0,0,0).getTime();
   return new Date(y, m-1, d, 23,59,59,999).getTime();
 }
+function daysBetweenISO(de, ate){
+  try{
+    const a = rangeToTs(de, false);
+    const b = rangeToTs(ate, true);
+    return Math.max(1, Math.ceil((b-a+1) / (24*60*60*1000)));
+  }catch(e){ return 1; }
+}
 
 function templateMessage(msg, lead){
   const nome = lead?.nome || "";
@@ -379,6 +386,12 @@ function templateMessage(msg, lead){
     .replaceAll("{{nome}}", nome)
     .replaceAll("{{telefone}}", tel)
     .replaceAll("{{email}}", em);
+}
+
+// ✅ Link SMS mais compatível em Android
+function buildSmsHref(telClean, encodedText){
+  // muitos Android aceitam melhor "?&body="
+  return `sms:${telClean}?&body=${encodedText}`;
 }
 
 async function getUserDoc(uid){
@@ -626,6 +639,7 @@ function mapLeadColumns(row){
   return { nome, telefone, email };
 }
 function makeLeadDoc(base){
+  const ts = nowMs();
   return {
     nome: base.nome || "",
     telefone: base.telefone || "",
@@ -638,14 +652,19 @@ function makeLeadDoc(base){
     donoUpload: null,
     listaRef: null,
 
-    criadoEm: nowMs(),
-    atualizadoEm: nowMs(),
+    criadoEm: ts,
+    atualizadoEm: ts,
 
     emAtendimentoEm: null,
     timestampDistribuicao: null,
     timestampFinalizacao: null,
 
-    cooldownAte: null, // ✅ NOVO: bloqueia reaparecer por alguns minutos
+    // ✅ NOVO: ordenação da fila (usada no JS, sem exigir índice composto)
+    // menor = mais antigo (atende antes). Quando "NÃO ATENDEU", vira "agora" => vai pro fim.
+    filaOrdem: ts,
+
+    // Mantive o campo por compatibilidade (mas não usamos mais para voltar em 5 min)
+    cooldownAte: null,
 
     atendeu: null,
     resultado: null,
@@ -743,8 +762,16 @@ function activeBadge(ativo){
 }
 
 /** =========================
- *  Lead picking
+ *  Lead picking (sem exigir índice composto)
  *  ========================= */
+function leadSortValue(x){
+  // menor => vem primeiro. Se não existir, cai para criadoEm.
+  const fo = (x && typeof x.filaOrdem === "number") ? x.filaOrdem : null;
+  if(typeof fo === "number") return fo;
+  const ce = (x && typeof x.criadoEm === "number") ? x.criadoEm : 0;
+  return ce || 0;
+}
+
 async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equipeCorretor }){
   let q = db.collection("leads").where("status","==","fila");
 
@@ -756,22 +783,20 @@ async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equ
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
-  // ✅ Filtra cooldown no JS (sem precisar índice composto)
-  const snap = await q.limit(25).get();
+  // ✅ Sem cooldown e sem orderBy (evita índices). Pegamos um lote e ordenamos no JS.
+  const snap = await q.limit(40).get();
   if(snap.empty) return null;
 
+  const docs = snap.docs.map(d => ({ doc:d, data:(d.data()||{}) }));
+  docs.sort((a,b)=> leadSortValue(a.data) - leadSortValue(b.data));
+
+  const chosen = docs[0];
+  if(!chosen) return null;
+
+  const ref = chosen.doc.ref;
+  const data = chosen.data;
+
   const agora = nowMs();
-
-  const chosenDoc = snap.docs.find(d=>{
-    const x = d.data() || {};
-    const cd = x.cooldownAte;
-    return !cd || typeof cd !== "number" || cd <= agora;
-  });
-
-  if(!chosenDoc) return null;
-
-  const ref = chosenDoc.ref;
-  const data = chosenDoc.data();
 
   await ref.update({
     status: "em_atendimento",
@@ -782,13 +807,14 @@ async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equ
     timestampDistribuicao: agora,
     atualizadoEm: agora,
 
-    cooldownAte: null, // ✅ limpa ao entrar em atendimento
+    cooldownAte: null,
 
     totalTentativas: firebase.firestore.FieldValue.increment(1),
     [`tentativasPorCorretor.${corretorUid}`]: firebase.firestore.FieldValue.increment(1),
     [`_lastTryDayByCorretor.${corretorUid}`]: dayKey(agora)
   });
 
+  // Uma leitura para pegar o doc atualizado (mantive para garantir consistência)
   const fresh = await ref.get();
   return { ref, data: fresh.data() };
 }
@@ -846,13 +872,11 @@ function displayCorretorName(row, usersMap){
 }
 
 /** =========================================================
- *  🔥 CORREÇÃO PRINCIPAL: LEITURAS SEM ÍNDICE COMPOSTO
- *  - Buscamos por orderBy simples e filtramos no JS
- *  - Assim Top5 / MiniCRM / Relatórios param de "Carregando..."
+ *  RELATÓRIOS / TOP5 / MINI CRM (proteção de leituras)
  *  ========================================================= */
 
-// Puxa finalizados recentes sem where(status==...), e filtra no JS
-async function fetchFinalizadosRecentes({ limit=1500 }={}){
+// ✅ LIMITES mais baixos para não estourar leitura
+async function fetchFinalizadosRecentes({ limit=800 }={}){
   const snap = await db.collection("leads")
     .orderBy("timestampFinalizacao","desc")
     .limit(limit)
@@ -861,15 +885,13 @@ async function fetchFinalizadosRecentes({ limit=1500 }={}){
   const arr = [];
   snap.forEach(d=>{
     const x = d.data() || {};
-    // só considera se tiver timestampFinalizacao (senão pode vir nulo)
     if(!x.timestampFinalizacao) return;
     arr.push({ id:d.id, ...x });
   });
   return arr;
 }
 
-// Puxa tentativas recentes (distribuicao) sem where, filtra no JS
-async function fetchTentativasRecentes({ limit=2000 }={}){
+async function fetchTentativasRecentes({ limit=1200 }={}){
   const snap = await db.collection("leads")
     .orderBy("timestampDistribuicao","desc")
     .limit(limit)
@@ -899,27 +921,40 @@ function applyScope(list, { scope, myUser }){
   return list; // diretor: tudo
 }
 
-// Faz o período DE/ATÉ usando dados recentes (sem índices compostos)
+// ✅ Proteção: limita relatório pesado para no máximo 7 dias (evita travar/estourar quota)
 async function fetchLeadsForPeriodNoIndex({ scope, myUser, de, ate }){
   const startTs = rangeToTs(de, false);
   const endTs   = rangeToTs(ate, true);
 
-  // Para histórico grande: aumente limit se precisar.
-  // Quanto maior, mais pesado no celular. Mantive seguro.
+  // Se o período for grande, a chance de estourar leituras é alta.
+  // Mantemos seguro: limite de 7 dias (você pediu foco em não travar).
+  const dias = daysBetweenISO(de, ate);
+  const safeDias = Math.min(dias, 7);
+
+  let safeDe = de;
+  if(dias > 7){
+    // recorta para os últimos 7 dias até "ate"
+    const end = rangeToTs(ate, false);
+    const d = new Date(end);
+    d.setDate(d.getDate() - 6);
+    safeDe = toISODateInput(d.getTime());
+  }
+
+  const startSafe = rangeToTs(safeDe, false);
+  const endSafe   = endTs;
+
   const [finalizadosAll, tentativasAll] = await Promise.all([
-    fetchFinalizadosRecentes({ limit: 2500 }),
-    fetchTentativasRecentes({ limit: 3500 })
+    fetchFinalizadosRecentes({ limit: 800 + (safeDias * 120) }),
+    fetchTentativasRecentes({ limit: 1200 + (safeDias * 180) })
   ]);
 
-  // filtra por período
-  let finals = finalizadosAll.filter(x => inRange(x.timestampFinalizacao, startTs, endTs) && (x.status === "finalizado" || x.atendeu === true || !!x.resultado));
-  let tries  = tentativasAll.filter(x => inRange(x.timestampDistribuicao, startTs, endTs));
+  let finals = finalizadosAll.filter(x => inRange(x.timestampFinalizacao, startSafe, endSafe) && (x.status === "finalizado" || x.atendeu === true || !!x.resultado));
+  let tries  = tentativasAll.filter(x => inRange(x.timestampDistribuicao, startSafe, endSafe));
 
-  // aplica escopo
   finals = applyScope(finals, { scope, myUser });
   tries  = applyScope(tries,  { scope, myUser });
 
-  return { finals, tries };
+  return { finals, tries, safeDe, safeAte: ate, wasClamped: (dias > 7) };
 }
 
 function computeScoreboard({ finals, tries }){
@@ -1063,7 +1098,7 @@ async function renderPainel(role, user, ud){
 window.setMeActive = async function(ativo){
   const user = auth.currentUser;
   await setActiveStatus(user.uid, ativo);
-  cachedUserData = await getUserDoc(user.uid);
+  cachedUserData = await getUserDoc(user.uid); // ok: ação manual
   await renderAppShell();
 };
 
@@ -1109,8 +1144,8 @@ async function renderAtendimento(role, user, ud){
 
 window.pegarProximoLead = async function(){
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  if(!me.ativo) return alert("Você está PAUSADO. Clique em ESTOU ATIVO primeiro.");
+  const me = cachedUserData; // ✅ sem leitura
+  if(!me || !me.ativo) return alert("Você está PAUSADO. Clique em ESTOU ATIVO primeiro.");
   if(leadAtualRef) return alert("Você já está com um lead em atendimento. Finalize antes.");
 
   const source = $("leadSource").value;
@@ -1139,18 +1174,23 @@ async function renderLeadInArea(){
   const lead = leadAtualData;
   const area = $("leadArea");
 
-  const user = auth.currentUser;
-  const snap = await db.collection("users").doc(user.uid).get();
-  const userAtual = snap.exists ? (snap.data() || {}) : {};
+  // ✅ sem leitura no Firestore (evita mensagem vazia quando quota/limite)
+  const userAtual = cachedUserData || {};
   const isAtivo = !!userAtual.ativo;
 
   const telClean = cleanPhone(lead.telefone);
-  const msgBase  = userAtual.mensagemPadrao || "";
+
+  const msgBase  = (userAtual.mensagemPadrao && String(userAtual.mensagemPadrao).trim())
+    ? userAtual.mensagemPadrao
+    : "Olá {{nome}}, aqui é da equipe Alvena. Estou tentando falar com você sobre seu interesse.";
+
   const msgFinal = encodeURIComponent(templateMessage(msgBase, lead));
 
   const emailTo = encodeURIComponent(lead.email || "");
   const mailSubject = encodeURIComponent("PROEFI - ALVENA");
   const mailBody = msgFinal;
+
+  const smsHref = buildSmsHref(telClean, msgFinal);
 
   area.innerHTML = `
     <div class="row">
@@ -1170,7 +1210,7 @@ async function renderLeadInArea(){
         <button class="btn btnBlue ${!isAtivo?"btnDisabled":""}" ${!isAtivo?"disabled":""}>📞 LIGAR</button>
       </a>
 
-      <a href="sms:${telClean}?body=${msgFinal}">
+      <a href="${smsHref}">
         <button class="btn btnBlue ${!isAtivo?"btnDisabled":""}" ${!isAtivo?"disabled":""}>📩 SMS</button>
       </a>
 
@@ -1197,22 +1237,23 @@ async function renderLeadInArea(){
 window.uiNaoAtendeu = async function(){
   if(!leadAtualRef) return;
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  if(!me.ativo) return alert("Você está PAUSADO. Não pode avançar lead.");
+  const me = cachedUserData; // ✅ sem leitura
+  if(!me || !me.ativo) return alert("Você está PAUSADO. Não pode avançar lead.");
 
-  const ok = await openModal("Confirmar", "Marcar como NÃO ATENDEU e devolver para fila?");
+  const ok = await openModal("Confirmar", "Marcar como NÃO ATENDEU e devolver para o FIM da fila?");
   if(!ok) return;
 
-  // ✅ COOLDOWN: não volta a aparecer por alguns minutos
-  const COOLDOWN_MINUTOS = 5; // ajuste aqui (ex.: 2, 3, 10)
-  const cooldownAte = nowMs() + (COOLDOWN_MINUTOS * 60 * 1000);
+  // ✅ ALTERAÇÃO: volta por último na fila (sem 5 minutos)
+  const novaFilaOrdem = nowMs();
 
   await leadAtualRef.update({
     status: "fila",
     corretorId: (leadAtualData.origem === "geral") ? user.uid : null,
     corretorEmail: (leadAtualData.origem === "geral") ? user.email : null,
 
-    cooldownAte: cooldownAte, // ✅ NOVO
+    filaOrdem: novaFilaOrdem, // ✅ joga pro final
+
+    cooldownAte: null, // não usamos mais
 
     emAtendimentoEm: null,
     timestampFinalizacao: null,
@@ -1227,7 +1268,7 @@ window.uiNaoAtendeu = async function(){
   leadAtualData = null;
   detailsOpen = false;
 
-  $("leadArea").innerHTML = `<div class="center muted">Lead devolvido para a fila. Pegando outro...</div>`;
+  $("leadArea").innerHTML = `<div class="center muted">Lead devolvido pro fim da fila. Pegando outro...</div>`;
 
   try{
     await pegarProximoLead();
@@ -1296,9 +1337,8 @@ window.toggleCollapse = function(id){
 
 window.confirmarAtendeu = async function(resultado){
   if(!leadAtualRef) return;
-  const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
-  if(!me.ativo) return alert("Você está PAUSADO. Não pode finalizar.");
+  const me = cachedUserData; // ✅ sem leitura
+  if(!me || !me.ativo) return alert("Você está PAUSADO. Não pode finalizar.");
 
   let dataAgendada = null;
   let obs = null;
@@ -1349,7 +1389,7 @@ async function renderMiniCRM(role, user, ud){
       <div class="row">
         <div class="grow">
           <div><b>Mini CRM</b></div>
-          <div class="small muted">Agendamentos e Promessas (sem travar por índice).</div>
+          <div class="small muted">Agendamentos e Promessas (proteção de leituras).</div>
         </div>
         <button class="btn btnGold" style="max-width:220px" onclick="loadMiniCRM()">ATUALIZAR</button>
       </div>
@@ -1366,16 +1406,14 @@ window.loadMiniCRM = async function(){
 
   try{
     const user = auth.currentUser;
-    const me = await getUserDoc(user.uid);
+    const me = cachedUserData || await getUserDoc(user.uid); // fallback
     const role = me.role;
 
-    // busca finalizados recentes SEM where(status==finalizado)
-    let list = await fetchFinalizadosRecentes({ limit: 2500 });
+    // ✅ reduzido de 2500 para 800 (proteção de leituras)
+    let list = await fetchFinalizadosRecentes({ limit: 800 });
 
-    // filtra só ag/pr
     list = list.filter(x => x.resultado === "AGENDAMENTO" || x.resultado === "PROMESSA DOCUMENTAÇÃO");
 
-    // escopo
     if(role === "corretor"){
       list = list.filter(x => x.corretorId === user.uid);
     }else if(role === "gerente"){
@@ -1388,7 +1426,6 @@ window.loadMiniCRM = async function(){
       return;
     }
 
-    // nomes
     const ids = list.map(x=>x.corretorId).filter(Boolean);
     const usersMap = await fetchUsersMapByIds(ids);
 
@@ -1462,7 +1499,7 @@ async function renderResultados(role, user, ud){
   return `
     <div class="card">
       <div><b>Relatórios e Rankings</b></div>
-      <div class="small muted">Sem travar por índice (filtra no JS).</div>
+      <div class="small muted">Proteção de leituras: máximo 7 dias por vez.</div>
       <div class="divider"></div>
 
       <div class="grid2">
@@ -1495,7 +1532,7 @@ window.gerarRelatorioExcelPeriodo = async function(){
 
   try{
     const user = auth.currentUser;
-    const me = await getUserDoc(user.uid);
+    const me = cachedUserData || await getUserDoc(user.uid);
     const role = me.role;
 
     if(role === "corretor"){
@@ -1508,8 +1545,7 @@ window.gerarRelatorioExcelPeriodo = async function(){
 
     const scope = (role==="gerente") ? "gerente" : "diretor";
 
-    // ✅ sem índice composto
-    const { finals, tries } = await fetchLeadsForPeriodNoIndex({
+    const { finals, tries, safeDe, safeAte, wasClamped } = await fetchLeadsForPeriodNoIndex({
       scope,
       myUser: { uid:user.uid, equipe: me.equipe },
       de, ate
@@ -1528,7 +1564,8 @@ window.gerarRelatorioExcelPeriodo = async function(){
       ["Perfil", role.toUpperCase()],
       ["Email", user.email],
       ["Equipe", me.equipe || ""],
-      ["Período", `${de} até ${ate}`],
+      ["Período (seguro)", `${safeDe} até ${safeAte}`],
+      ["Aviso", wasClamped ? "Período maior que 7 dias foi reduzido para evitar estourar leituras." : "OK"],
       ["", ""],
       ["Total tentativas", totalTentativas],
       ["Total atendidos", totalAtendidos],
@@ -1575,10 +1612,13 @@ window.gerarRelatorioExcelPeriodo = async function(){
     XLSX.utils.book_append_sheet(wb, wsRank, "Ranking");
     XLSX.utils.book_append_sheet(wb, wsDet, "Atendidos");
 
-    XLSX.writeFile(wb, `PROEFI_RELATORIO_${role.toUpperCase()}_${de}_ATE_${ate}.xlsx`);
+    XLSX.writeFile(wb, `PROEFI_RELATORIO_${role.toUpperCase()}_${safeDe}_ATE_${safeAte}.xlsx`);
 
     if(box){
       box.innerHTML = `<div class="ok">Excel gerado com sucesso!</div><div class="small muted">Arquivo baixado no dispositivo.</div>`;
+      if(wasClamped){
+        box.innerHTML += `<div class="small muted" style="margin-top:6px">⚠️ Período maior que 7 dias foi reduzido para proteger suas leituras.</div>`;
+      }
     }
   }catch(e){
     if(box){
@@ -1590,10 +1630,7 @@ window.gerarRelatorioExcelPeriodo = async function(){
 };
 
 /** =========================
- *  TOP 5 (corrigido: não fica carregando)
- *  - hoje
- *  - se vazio, últimos 7 dias
- *  - sem índice composto (filtra no JS)
+ *  TOP 5 (proteção de leituras)
  *  ========================= */
 window.loadTop5 = async function(){
   const box = $("top5Box") || $("resultsBox");
@@ -1603,12 +1640,11 @@ window.loadTop5 = async function(){
 
   try{
     const user = auth.currentUser;
-    const me = await getUserDoc(user.uid);
+    const me = cachedUserData || await getUserDoc(user.uid);
     const equipe = me.equipe || "equipe1";
     const today = toISODateInput(nowMs());
 
     async function computePeriod(de, ate){
-      // diretor: pega base "global" (sem índices)
       const { finals, tries } = await fetchLeadsForPeriodNoIndex({
         scope: "diretor",
         myUser: { uid:user.uid, equipe },
@@ -1763,7 +1799,7 @@ window.uploadListaGeral = async function(){
   const file = $("fileDiretor")?.files?.[0];
   if(!file) return alert("Selecione um arquivo.");
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
+  const me = cachedUserData || await getUserDoc(user.uid);
   if(me.role !== "diretor") return alert("Apenas DIRETOR pode subir lista geral.");
   try{
     const r = await uploadLeadsFromFile({ file, origem:"geral", equipe:null, donoUploadUid:user.uid, distribuirGeralAgora:true });
@@ -1778,7 +1814,7 @@ window.uploadListaGerente = async function(){
   const file = $("fileGerente")?.files?.[0];
   if(!file) return alert("Selecione um arquivo.");
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
+  const me = cachedUserData || await getUserDoc(user.uid);
   if(me.role !== "gerente") return alert("Apenas GERENTE pode subir lista da equipe.");
   try{
     const equipe = me.equipe || "equipe1";
@@ -1794,7 +1830,7 @@ window.uploadListaCorretor = async function(){
   const file = $("fileCorretor")?.files?.[0];
   if(!file) return alert("Selecione um arquivo.");
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
+  const me = cachedUserData || await getUserDoc(user.uid);
   if(me.role !== "corretor") return alert("Apenas CORRETOR pode subir lista própria.");
   try{
     const equipe = me.equipe || "equipe1";
@@ -1808,7 +1844,7 @@ window.uploadListaCorretor = async function(){
 
 window.prepararEmailRelatorio = async function(){
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
+  const me = cachedUserData || await getUserDoc(user.uid);
   const role = me.role;
   const equipe = me.equipe || "equipe1";
 
@@ -1879,7 +1915,7 @@ async function renderAprovacao(role, user, ud){
 
 window.loadApprovals = async function(){
   const user = auth.currentUser;
-  const me = await getUserDoc(user.uid);
+  const me = cachedUserData || await getUserDoc(user.uid);
   const role = me.role;
 
   if(role !== "diretor" && role !== "gerente"){
