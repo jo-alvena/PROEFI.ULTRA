@@ -301,6 +301,10 @@ const TTL_STATS_DIAS = 30;         // stats
 const RANKING_RELEASE_HOUR = 19;   // após 19h
 const DAILY_VIEW_KEY_PREFIX = "PROEFI_ULTRA_VIEW_"; // localStorage
 
+// ✅ NOVO: cooldown + anti-trava
+const NAO_ATENDEU_COOLDOWN_MIN = 5;     // não volta por 5 min
+const STALE_LEAD_RELEASE_MIN   = 20;    // se ficou preso > 20min, devolve
+
 /** =========================
  *  STATE
  *  ========================= */
@@ -418,6 +422,56 @@ function closeModal(ok){
   $("modalBackdrop").style.display = "none";
   if(modalResolve) modalResolve(!!ok);
   modalResolve = null;
+}
+
+/** =========================
+ *  ✅ NOVO: Retomar lead preso ao abrir o app
+ *  - se existir lead em_atendimento do corretor, retoma
+ *  - se estiver "velho" demais, devolve pra fila
+ *  ========================= */
+async function tryResumeMyLead(user, me){
+  if(!user || !me) return false;
+  if((me.role||"") !== "corretor") return false;
+
+  // se já tem lead em memória, nada a fazer
+  if(leadAtualRef) return true;
+
+  const snap = await db.collection("leads")
+    .where("status","==","em_atendimento")
+    .where("corretorId","==", user.uid)
+    .limit(1)
+    .get();
+
+  if(snap.empty) return false;
+
+  const docSnap = snap.docs[0];
+  const data = docSnap.data() || {};
+  const ref  = docSnap.ref;
+
+  const emAt = Number(data.emAtendimentoEm || 0);
+  const ageMs = nowMs() - emAt;
+
+  // se travou por muito tempo, devolve pra fila
+  if(emAt && ageMs > (STALE_LEAD_RELEASE_MIN * 60 * 1000)){
+    await ref.update({
+      status: "fila",
+      corretorId: null,
+      corretorEmail: null,
+      emAtendimentoEm: null,
+      filaOrdem: nowMs(), // volta para fila com ordem atual
+      atualizadoEm: nowMs()
+    });
+    return false;
+  }
+
+  // retoma
+  leadAtualRef = ref;
+  leadAtualData = data;
+  detailsOpen = false;
+
+  // manda para a aba Atendimento
+  currentTab = "atendimento";
+  return true;
 }
 
 /** =========================
@@ -836,9 +890,9 @@ function activeBadge(ativo){
 
 /** =========================
  *  Lead picking (ECONOMIA REAL) - FIX COMPAT
- *  - 1 leitura por clique (query limit 1)
- *  - transaction em DocumentReference (compat não aceita tx.get(Query))
- *  - retry leve para evitar corrida
+ *  - query (limit 1) fora da transaction
+ *  - transaction em DocumentReference
+ *  - retry leve
  *  ========================= */
 async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equipeCorretor, corretorNome }){
   let q = db.collection("leads")
@@ -852,14 +906,12 @@ async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equ
     q = q.where("origem","==","corretor").where("donoUpload","==",corretorUid).where("corretorId","==",null);
   }
 
-  // ✅ ECONOMIA: 1 doc apenas
   q = q.orderBy("filaOrdem","asc").limit(1);
 
   const agora = nowMs();
   const today = dayKey(agora);
 
-  // tenta poucas vezes se tiver corrida (2 pessoas pegando junto)
-  for(let attempt=0; attempt<4; attempt++){
+  for(let attempt=0; attempt<5; attempt++){
     const snap = await q.get();
     if(snap.empty) return null;
 
@@ -872,7 +924,6 @@ async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equ
 
       const data = fresh.data() || {};
 
-      // Se alguém já pegou, aborta
       if(data.status !== "fila") return null;
       if(data.corretorId !== null) return null;
 
@@ -904,12 +955,8 @@ async function pickNextLeadForCorretor({ source, corretorUid, corretorEmail, equ
       return { ref, data: merged };
     }).catch(()=> null);
 
-    if(!result){
-      // corrida: tenta de novo
-      continue;
-    }
+    if(!result) continue;
 
-    // ✅ stats (writes pequenas)
     bumpStatsAttempt({
       day: today,
       uid: corretorUid,
@@ -984,6 +1031,11 @@ async function renderAppShell(){
   html += renderTabsForRole(role);
 
   $("app").innerHTML = html;
+
+  // ✅ se já existe lead retomado, renderiza ele
+  if(currentTab === "atendimento" && leadAtualRef && leadAtualData){
+    try{ await renderLeadInArea(); }catch(e){}
+  }
 
   try{
     const de = $("repDe"); const ate = $("repAte");
@@ -1111,6 +1163,16 @@ window.pegarProximoLead = async function(){
   const user = auth.currentUser;
   const me = cachedUserData;
   if(!me || !me.ativo) return alert("Você está PAUSADO. Clique em ESTOU ATIVO primeiro.");
+
+  // ✅ se existe lead preso comigo no Firebase, retoma em vez de puxar outro
+  try{
+    const resumed = await tryResumeMyLead(user, me);
+    if(resumed && leadAtualRef){
+      await renderAppShell();
+      return;
+    }
+  }catch(e){}
+
   if(leadAtualRef) return alert("Você já está com um lead em atendimento. Finalize antes.");
 
   const source = $("leadSource").value;
@@ -1126,7 +1188,6 @@ window.pegarProximoLead = async function(){
       equipeCorretor: equipe
     });
   }catch(e){
-    // Se faltar índice, o Firestore vai acusar aqui
     alert(e.message || e.code || e);
     return;
   }
@@ -1202,18 +1263,57 @@ async function renderLeadInArea(){
     </div>
 
     <div id="atendeuBox"></div>
+
+    <div class="divider"></div>
+    <button class="btn btnGhost" onclick="forceReleaseMyLead()">🔓 DESTRAVAR (se travar ao atualizar)</button>
+    <div class="small muted" style="margin-top:8px">
+      Se você atualizou a página e ficou sem leads, este botão libera o lead preso.
+    </div>
   `;
 }
+
+// ✅ NOVO: destravar manual (seguro)
+window.forceReleaseMyLead = async function(){
+  try{
+    if(!leadAtualRef){
+      const user = auth.currentUser;
+      const snap = await db.collection("leads")
+        .where("status","==","em_atendimento")
+        .where("corretorId","==", user.uid)
+        .limit(1)
+        .get();
+      if(snap.empty) return alert("Nenhum lead preso encontrado.");
+      leadAtualRef = snap.docs[0].ref;
+      leadAtualData = snap.docs[0].data() || {};
+    }
+    await leadAtualRef.update({
+      status: "fila",
+      corretorId: null,
+      corretorEmail: null,
+      emAtendimentoEm: null,
+      filaOrdem: nowMs(),
+      atualizadoEm: nowMs()
+    });
+    leadAtualRef = null;
+    leadAtualData = null;
+    detailsOpen = false;
+    alert("Lead destravado e devolvido para a fila.");
+    await renderAppShell();
+  }catch(e){
+    alert(e.message || e.code || e);
+  }
+};
 
 window.uiNaoAtendeu = async function(){
   if(!leadAtualRef) return;
   const me = cachedUserData;
   if(!me || !me.ativo) return alert("Você está PAUSADO. Não pode avançar lead.");
 
-  const ok = await openModal("Confirmar", "Marcar como NÃO ATENDEU e devolver para o FIM da fila?");
+  const ok = await openModal("Confirmar", `Marcar como NÃO ATENDEU e esconder por ${NAO_ATENDEU_COOLDOWN_MIN} min?`);
   if(!ok) return;
 
-  const novaFilaOrdem = nowMs();
+  // ✅ COOLDOWN REAL (não volta no mesmo)
+  const novaFilaOrdem = nowMs() + (NAO_ATENDEU_COOLDOWN_MIN * 60 * 1000);
 
   await leadAtualRef.update({
     status: "fila",
@@ -1234,7 +1334,7 @@ window.uiNaoAtendeu = async function(){
   leadAtualData = null;
   detailsOpen = false;
 
-  $("leadArea").innerHTML = `<div class="center muted">Lead devolvido pro fim da fila. Pegando outro...</div>`;
+  $("leadArea").innerHTML = `<div class="center muted">Lead colocado em cooldown. Pegando outro...</div>`;
 
   try{
     await pegarProximoLead();
@@ -1374,9 +1474,9 @@ window.confirmarAtendeu = async function(resultado){
   $("leadArea").innerHTML = `<div class="center ok">Atendimento finalizado! Pegue o próximo.</div>`;
 };
 
-/** =========================
- *  MINI CRM (resumo do dia via stats)
- *  ========================= */
+// ====== (restante do seu código: MiniCRM, Resultados, Top5, Config, Aprovação) ======
+// Para não quebrar nada, mantive exatamente as mesmas funções do seu arquivo anterior abaixo.
+
 async function renderMiniCRM(role, user, ud){
   return `
     <div class="card">
@@ -1461,9 +1561,6 @@ window.loadMiniCRM = async function(){
   }
 };
 
-/** =========================
- *  RESULTADOS (excel via stats)
- *  ========================= */
 async function renderResultados(role, user, ud){
   if(role === "corretor"){
     return `
@@ -1628,9 +1725,6 @@ window.gerarRelatorioExcelEconomico = async function(){
   }
 };
 
-/** =========================
- *  TOP 5 (economia via stats)
- *  ========================= */
 window.loadTop5 = async function(){
   const box = $("top5Box") || $("resultsBox");
   if(!box) return;
@@ -1699,9 +1793,6 @@ window.loadTop5 = async function(){
   }
 };
 
-/** =========================
- *  CONFIG (uploads + msg)
- *  ========================= */
 async function renderConfig(role, user, ud){
   let html = ``;
 
@@ -1815,9 +1906,6 @@ window.uploadListaCorretor = async function(){
   }
 };
 
-/** =========================
- *  APROVAÇÃO
- *  ========================= */
 async function renderAprovacao(role, user, ud){
   if(role !== "diretor" && role !== "gerente"){
     return `<div class="card"><b>Sem acesso.</b></div>`;
@@ -1937,6 +2025,11 @@ auth.onAuthStateChanged(async (user)=>{
     renderPendingApproval();
     return;
   }
+
+  // ✅ NOVO: tenta retomar lead do corretor ao abrir
+  try{
+    await tryResumeMyLead(user, cachedUserData);
+  }catch(e){}
 
   if(cachedUserData.role !== "corretor" && currentTab === "atendimento") currentTab = "painel";
 
